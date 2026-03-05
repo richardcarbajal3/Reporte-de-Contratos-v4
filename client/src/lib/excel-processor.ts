@@ -1,5 +1,163 @@
 import * as XLSX from 'xlsx';
 
+// ============================================================
+// Sheet Name Aliases: maps canonical names to known internal aliases
+// ============================================================
+const SHEET_NAME_ALIASES: Record<string, string[]> = {
+  contratos:        ['Contratos'],
+  pagos:            ['Pago'],           // Pago = pagos ya realizados
+  programacion:     ['SAP'],            // SAP = programacion de pagos del proximo mes
+  provisiones:      ['Av&Provision', 'Provision'],
+  garantias:        ['Garantia', 'Garantias'],
+  custodia:         ['C_Ent_Fin', 'Custodia'],
+  ordenes_servicio: ['OS.r.SAP'],
+  ordenes_cambio:   [],
+  avance_semanal:   [],
+  con_sap:          ['Con.SAP'],
+};
+
+// Anchor headers per sheet type for auto-detecting the header row
+const SHEET_ANCHOR_HEADERS: Record<string, string[]> = {
+  contratos:        ['CONTRATO', 'ADENDA', 'MONTO'],
+  pagos:            ['CONTRATO', 'ADENDA', 'VALOR'],
+  provisiones:      ['CONTRATO', 'ADENDA', 'PROVISIO'],
+  programacion:     ['CONTRATO', 'ADENDA'],
+  garantias:        ['CONTRATO', 'CARTA FIANZA'],
+  custodia:         ['CONTRATO', 'ADENDA'],
+  ordenes_servicio: ['CONTRATO', 'ORDEN'],
+  ordenes_cambio:   ['CONTRATO', 'CAMBIO'],
+  avance_semanal:   ['CONTRATO', 'AVANCE'],
+  con_sap:          ['CONTRATO'],
+};
+
+// ============================================================
+// Workbook Preprocessing: resolve sheet names + detect header rows
+// ============================================================
+
+function resolveSheetName(
+  canonicalName: string,
+  sheetNames: string[]
+): string | undefined {
+  // 1. Exact match
+  const exact = sheetNames.find(s => s === canonicalName);
+  if (exact) return exact;
+
+  // 2. Case-insensitive match on canonical name
+  const caseInsensitive = sheetNames.find(
+    s => s.toLowerCase().trim() === canonicalName.toLowerCase()
+  );
+  if (caseInsensitive) return caseInsensitive;
+
+  // 3. Alias match (case-insensitive)
+  const aliases = SHEET_NAME_ALIASES[canonicalName] || [];
+  for (const alias of aliases) {
+    const match = sheetNames.find(
+      s => s.toLowerCase().trim() === alias.toLowerCase().trim()
+    );
+    if (match) return match;
+  }
+
+  return undefined;
+}
+
+function detectHeaderRow(
+  sheet: XLSX.WorkSheet,
+  canonicalName: string,
+  maxScanRows = 30
+): number {
+  const rawRows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+  const anchors = (SHEET_ANCHOR_HEADERS[canonicalName] || [])
+    .map(a => a.toUpperCase());
+
+  // Pass 1: anchor-based detection
+  for (let i = 0; i < Math.min(rawRows.length, maxScanRows); i++) {
+    const row = rawRows[i];
+    if (!row) continue;
+
+    const cellValues = row
+      .map((cell: any) => (cell != null ? String(cell).trim().toUpperCase() : ''))
+      .filter((v: string) => v.length > 0);
+
+    if (anchors.length > 0) {
+      const matchCount = anchors.filter(anchor =>
+        cellValues.some((val: string) => val.includes(anchor))
+      ).length;
+      const threshold = Math.min(2, anchors.length);
+      if (matchCount >= threshold) return i;
+    }
+  }
+
+  // Pass 2: density heuristic - first row with 4+ non-empty string cells
+  for (let i = 0; i < Math.min(rawRows.length, maxScanRows); i++) {
+    const row = rawRows[i];
+    if (!row) continue;
+    const nonEmpty = row.filter((cell: any) => cell != null && String(cell).trim() !== '');
+    if (nonEmpty.length >= 4) return i;
+  }
+
+  return 0;
+}
+
+function extractSheetData(
+  sheet: XLSX.WorkSheet,
+  headerRow: number
+): Record<string, any>[] {
+  if (headerRow === 0) {
+    return XLSX.utils.sheet_to_json(sheet);
+  }
+  const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
+  range.s.r = headerRow;
+  return XLSX.utils.sheet_to_json(sheet, { range });
+}
+
+interface SheetResolution {
+  canonicalName: string;
+  actualName: string;
+  headerRow: number;
+}
+
+function normalizeWorkbook(workbook: XLSX.WorkBook): {
+  workbook: XLSX.WorkBook;
+  resolutions: SheetResolution[];
+  warnings: string[];
+} {
+  const warnings: string[] = [];
+  const resolutions: SheetResolution[] = [];
+  const newWorkbook = XLSX.utils.book_new();
+
+  const allCanonical = Object.keys(SHEET_NAME_ALIASES);
+
+  for (const canonical of allCanonical) {
+    const actualName = resolveSheetName(canonical, workbook.SheetNames);
+    if (!actualName) continue;
+
+    const sheet = workbook.Sheets[actualName];
+    const headerRow = detectHeaderRow(sheet, canonical);
+
+    if (headerRow > 0) {
+      warnings.push(
+        `Hoja "${actualName}" (${canonical}): datos detectados desde fila ${headerRow + 1}`
+      );
+    }
+
+    const data = extractSheetData(sheet, headerRow);
+    const newSheet = XLSX.utils.json_to_sheet(data);
+    XLSX.utils.book_append_sheet(newWorkbook, newSheet, canonical);
+
+    resolutions.push({ canonicalName: canonical, actualName, headerRow });
+  }
+
+  // Warn about unmapped sheets
+  for (const name of workbook.SheetNames) {
+    const alreadyMapped = resolutions.some(r => r.actualName === name);
+    if (!alreadyMapped) {
+      warnings.push(`Hoja "${name}" no tiene mapeo conocido, ignorada.`);
+    }
+  }
+
+  return { workbook: newWorkbook, resolutions, warnings };
+}
+
 export interface PaymentRecord {
   valorizacion: string;
   descripcion: string;
@@ -48,6 +206,7 @@ export interface ContractData {
   
   // Computed/Aggregated
   payments: number;
+  scheduledPayments: number; // Programacion: pagos planificados para el mes siguiente
   provisions: number;
   serviceOrders: number;
   changeOrders: number;
@@ -56,11 +215,14 @@ export interface ContractData {
   progress: number; // Avance
   balance: number; // Saldo
   
+  // SAP registration tracking
+  registeredInSap: boolean; // From Con.SAP sheet
+
   // Raw records for drill-down
   paymentsList: PaymentRecord[];
   guaranteesList: GuaranteeRecord[];
   provisionsList: ProvisionRecord[];
-  
+
   records: Record<string, any>[];
   comments: string[]; // Aggregated comments
 }
@@ -107,9 +269,17 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
     reader.onload = (e) => {
       try {
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
-        const workbook = XLSX.read(data, { type: 'array' });
-        
+        const rawWorkbook = XLSX.read(data, { type: 'array' });
+
+        // Preprocess: resolve sheet names + detect header rows
+        const normalized = normalizeWorkbook(rawWorkbook);
+        const workbook = normalized.workbook;
         const sheetNames = workbook.SheetNames;
+
+        console.log('Sheet resolutions:', normalized.resolutions);
+        if (normalized.warnings.length > 0) {
+          console.warn('Normalization warnings:', normalized.warnings);
+        }
         const result: ProcessingResult = {
           contracts: [],
           consolidated: [],
@@ -142,9 +312,8 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
           return String(val);
         };
 
-        // 1. Validate mandatory sheet
-        // Check case-insensitive
-        const contratosSheetName = sheetNames.find(s => s.toLowerCase().trim() === 'contratos');
+        // 1. Validate mandatory sheet (already normalized to canonical name)
+        const contratosSheetName = sheetNames.find(s => s === 'contratos');
         
         if (!contratosSheetName) {
           result.errors.push("Falta la hoja obligatoria 'contratos'.");
@@ -227,7 +396,8 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
             contractClass: r['CLASE CONTRATO'] || r['CLASE'] || 'Sin Clase',
             investmentType: r['TIPO_INVERSION'] || r['TIPO INVERSION'] || 'Capex',
             investmentGroup: r['GRUPO INVERSION'] || r['GRUPO'] || 'Sin Grupo',
-            payments: payments, 
+            payments: payments,
+            scheduledPayments: 0,
             provisions: 0,
             serviceOrders: 0,
             changeOrders: 0,
@@ -235,6 +405,7 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
             retention: retention,
             progress: 0,
             balance: 0,
+            registeredInSap: false,
             paymentsList: [],
             guaranteesList: [],
             provisionsList: [],
@@ -245,12 +416,13 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
 
         // 3. Process Secondary Sheets
         const secondarySheets = [
-          { name: 'pagos', field: 'payments', valCol: 'MONTO' }, // Will add to existing payments
+          { name: 'pagos', field: 'payments', valCol: 'MONTO' },
+          { name: 'programacion', field: 'scheduledPayments', valCol: 'MONTO' },
           { name: 'provisiones', field: 'provisions', valCol: 'MONTO' },
           { name: 'ordenes_servicio', field: 'serviceOrders', valCol: 'MONTO' },
           { name: 'ordenes_cambio', field: 'changeOrders', valCol: 'MONTO' },
-          { name: 'garantias', field: 'guarantees', valCol: 'CARTA FIANZA (US$)' }, // Changed from MONTO to specific column
-          { name: 'custodia', field: 'retention', valCol: 'MONTO' }, 
+          { name: 'garantias', field: 'guarantees', valCol: 'CARTA FIANZA (US$)' },
+          { name: 'custodia', field: 'retention', valCol: 'MONTO' },
         ];
 
         secondarySheets.forEach(conf => {
@@ -357,6 +529,23 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
                contract.progress = Math.max(contract.progress, Number(r['AVANCE'] || 0));
              }
            });
+        }
+
+        // Process 'con_sap' to mark contracts registered in SAP
+        if (sheetNames.includes('con_sap')) {
+          const sheet = workbook.Sheets['con_sap'];
+          const rows = XLSX.utils.sheet_to_json(sheet);
+          const sapContractIds = new Set<string>();
+          rows.forEach((row: any) => {
+            const r = NORMALIZE_HEADERS(row);
+            const contractId = r['CONTRATO'] || r['N° CONTRATO'] || r['N CONTRATO'];
+            if (contractId) sapContractIds.add(String(contractId));
+          });
+          contractsMap.forEach(c => {
+            if (sapContractIds.has(c.contractId)) {
+              c.registeredInSap = true;
+            }
+          });
         }
 
         // 4. Calculate Balances
