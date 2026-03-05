@@ -92,7 +92,7 @@ export function FileUpload() {
               <div>
                 <h3 className="text-xl font-heading font-semibold mb-2">Cargar Reporte Excel</h3>
                 <p className="text-sm text-muted-foreground max-w-xs mx-auto">
-                  Arrastra tu archivo aquí o haz clic para seleccionar. Asegúrate de incluir la hoja "contratos".
+                  Arrastra tu archivo aquí o haz clic para seleccionar. Acepta formato interno (Contratos, SAP, Pago...) o estándar. Las tablas se detectan automáticamente.
                 </p>
               </div>
               <Button variant="outline" className="mt-2">
@@ -110,10 +110,10 @@ export function FileUpload() {
             <span className="font-medium text-sm">Hojas Requeridas</span>
           </div>
           <ul className="text-xs text-muted-foreground space-y-1 ml-6 list-disc">
-            <li>contratos (obligatoria)</li>
-            <li>pagos</li>
-            <li>programacion</li>
-            <li>provisiones</li>
+            <li>Contratos (obligatoria)</li>
+            <li>Pago / pagos</li>
+            <li>SAP / programacion</li>
+            <li>Av&Provision / provisiones</li>
           </ul>
         </div>
         <div className="p-4 rounded-lg border bg-card/50 backdrop-blur-sm">
@@ -123,8 +123,8 @@ export function FileUpload() {
           </div>
           <ul className="text-xs text-muted-foreground space-y-1 ml-6 list-disc">
             <li>Llave: CONTRATO + ADENDA</li>
-            <li>Columnas por nombre exacto</li>
-            <li>Consolidación automática</li>
+            <li>Detección automática de tablas</li>
+            <li>Garantia, C_Ent_Fin, OS.r.SAP, Con.SAP</li>
           </ul>
         </div>
       </div>
