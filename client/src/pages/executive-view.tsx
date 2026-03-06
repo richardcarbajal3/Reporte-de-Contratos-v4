@@ -106,15 +106,48 @@ export default function ExecutiveView() {
     return { total, amort, pending: total - amort };
   };
 
-  // Chart Data: Top Contracts (Filtered by Class)
-  const topContractsData = [...filteredByClassConsolidated]
-    .sort((a, b) => b.totalAmount - a.totalAmount)
-    .slice(0, 5)
-    .map(c => ({
-      name: `Cto. ${c.contractId}`,
-      amount: c.totalAmount,
-      paid: c.totalPaid
-    }));
+  // Helper: classify raw ESTADO into main category
+  // EJECUCION = solo "EJECUCION", CERRADOS = solo "CERRADO/CERRADOS", todo lo demás = FINIQUITO
+  const getMainStateCategory = (state: string): string => {
+    const s = state.toUpperCase().trim();
+    if (s === 'EJECUCION' || s === 'EN EJECUCION') return 'EJECUCION';
+    if (s === 'CERRADO' || s === 'CERRADOS') return 'CERRADOS';
+    return 'FINIQUITO';
+  };
+
+  // Chart Data: Contracts grouped by Estado (main category → sub-states with amounts)
+  const { stateChartData, allSubStates } = useMemo(() => {
+    const categoryMap: Record<string, Record<string, { count: number; amount: number }>> = {};
+
+    filteredByClassConsolidated.forEach(c => {
+      const raw = c.state?.trim() || 'Sin Estado';
+      const main = getMainStateCategory(raw);
+      if (!categoryMap[main]) categoryMap[main] = {};
+      if (!categoryMap[main][raw]) categoryMap[main][raw] = { count: 0, amount: 0 };
+      categoryMap[main][raw].count += 1;
+      categoryMap[main][raw].amount += c.totalAmount;
+    });
+
+    const order = ['EJECUCION', 'FINIQUITO', 'CERRADOS'];
+    const subStatesSet = new Set<string>();
+
+    const data = order
+      .filter(cat => categoryMap[cat])
+      .map(cat => {
+        const entry: Record<string, any> = { mainState: cat };
+        let totalCount = 0;
+        Object.entries(categoryMap[cat]).forEach(([sub, info]) => {
+          entry[sub] = info.amount;
+          entry[`${sub}_count`] = info.count;
+          totalCount += info.count;
+          subStatesSet.add(sub);
+        });
+        entry._totalCount = totalCount;
+        return entry;
+      });
+
+    return { stateChartData: data, allSubStates: Array.from(subStatesSet) };
+  }, [filteredByClassConsolidated]);
 
   // Format aggregated field values for display
   const fmtField = (f: AggregatedField) => {
@@ -332,23 +365,39 @@ export default function ExecutiveView() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
         <Card className="col-span-1">
           <CardHeader>
-            <CardTitle>Top 5 Contratos por Monto</CardTitle>
-            <CardDescription>Comparativa de monto contratado vs pagado</CardDescription>
+            <CardTitle>Contratos por Estado</CardTitle>
+            <CardDescription>Distribución de montos por estado contractual (sub-estados)</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={topContractsData} layout="vertical" margin={{ left: 20 }}>
+                <BarChart data={stateChartData} layout="vertical" margin={{ left: 30 }}>
                   <XAxis type="number" hide />
-                  <YAxis dataKey="name" type="category" width={80} tick={{fontSize: 12}} />
-                  <Tooltip 
+                  <YAxis dataKey="mainState" type="category" width={100} tick={{fontSize: 12}} />
+                  <Tooltip
                     cursor={{fill: 'transparent'}}
                     contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-                    formatter={(value) => Number(value).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                    formatter={(value: any, name: string, props: any) => {
+                      const countKey = `${name}_count`;
+                      const count = props.payload[countKey];
+                      return [
+                        `${Number(value).toLocaleString('en-US', { style: 'currency', currency: 'USD' })} (${count} cto${count !== 1 ? 's' : ''})`,
+                        name
+                      ];
+                    }}
                   />
                   <Legend />
-                  <Bar dataKey="amount" fill="hsl(215, 25%, 27%)" radius={[0, 4, 4, 0]} barSize={20} name="Contratado" />
-                  <Bar dataKey="paid" fill="hsl(221, 83%, 53%)" radius={[0, 4, 4, 0]} barSize={20} name="Pagado" />
+                  {allSubStates.map((sub, i) => (
+                    <Bar
+                      key={sub}
+                      dataKey={sub}
+                      stackId="estado"
+                      fill={COLORS[i % COLORS.length]}
+                      radius={i === allSubStates.length - 1 ? [0, 4, 4, 0] : undefined}
+                      barSize={28}
+                      name={sub}
+                    />
+                  ))}
                 </BarChart>
               </ResponsiveContainer>
             </div>
