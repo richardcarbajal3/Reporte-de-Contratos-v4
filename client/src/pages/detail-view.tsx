@@ -3,7 +3,7 @@ import { Layout } from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Download, Info, Building2, User, Tag } from "lucide-react";
+import { Download, Info, Building2, User, Tag, Calendar, Shield, Banknote } from "lucide-react";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import {
@@ -12,6 +12,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+
+const fmt = (n: number) => n.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function DetailView() {
   const consolidated = useAppStore(s => s.consolidated);
@@ -24,17 +26,15 @@ export default function DetailView() {
     const tableData = contracts.map(c => [
       c.key,
       c.description || '-',
-      c.amount.toLocaleString('es-PE', { style: 'currency', currency: 'PEN' }),
-      c.payments.toLocaleString('es-PE', { style: 'currency', currency: 'PEN' }),
-      c.provisions.toLocaleString('es-PE', { style: 'currency', currency: 'PEN' }),
-      c.serviceOrders.toLocaleString('es-PE', { style: 'currency', currency: 'PEN' }),
-      c.changeOrders.toLocaleString('es-PE', { style: 'currency', currency: 'PEN' }),
-      c.guarantees.toLocaleString('es-PE', { style: 'currency', currency: 'PEN' }),
-      c.balance.toLocaleString('es-PE', { style: 'currency', currency: 'PEN' })
+      fmt(c.amount),
+      fmt(c.deductivo),
+      fmt(c.amountNet),
+      fmt(c.payments),
+      fmt(c.saldoPorPagar),
     ]);
 
     autoTable(doc, {
-      head: [['ID (Con-Ade)', 'Descripción', 'Monto', 'Pagos', 'Provisiones', 'O. Servicio', 'O. Cambio', 'Garantías', 'Saldo']],
+      head: [['ID', 'Descripcion', 'Monto Contratado', 'Deductivo', 'Monto Neto', 'Pagos', 'Saldo x Pagar']],
       body: tableData,
       startY: 20,
       styles: { fontSize: 8 },
@@ -44,9 +44,20 @@ export default function DetailView() {
     doc.save("detalle_adendas.pdf");
   };
 
-  // Get parent contract info (usually adenda 0 or first item)
   const getParentInfo = (items: typeof contracts) => {
     return items.find(i => i.addendumId === '0') || items[0];
+  };
+
+  // Aggregate guarantees across all addendums for a group
+  const getGroupGuarantees = (items: typeof contracts) => {
+    return items.flatMap(i => i.guaranteesList);
+  };
+
+  // Check if any item in group has adelanto
+  const getGroupAdelanto = (items: typeof contracts) => {
+    const total = items.reduce((s, i) => s + i.adelantoContrato, 0);
+    const amort = items.reduce((s, i) => s + i.amortizacionAdelanto, 0);
+    return { total, amort, pending: total - amort };
   };
 
   return (
@@ -65,6 +76,9 @@ export default function DetailView() {
       <div className="space-y-6">
         {consolidated.map((group) => {
           const parent = getParentInfo(group.items);
+          const guarantees = getGroupGuarantees(group.items);
+          const adelanto = getGroupAdelanto(group.items);
+
           return (
             <Card key={group.contractId}>
               {/* Contract Parent Header */}
@@ -88,10 +102,10 @@ export default function DetailView() {
                     <p className="text-sm text-foreground">{parent.description}</p>
                   )}
                   {parent?.chineseDescription && (
-                    <p className="text-sm text-muted-foreground">{parent.chineseDescription}</p>
+                    <p className="text-sm text-muted-foreground italic">{parent.chineseDescription}</p>
                   )}
 
-                  {/* Metadata row */}
+                  {/* Metadata row 1: Clase, Empresa, Resp */}
                   <div className="flex flex-wrap gap-4 text-xs text-muted-foreground mt-1">
                     {parent?.contractClass && parent.contractClass !== 'Sin Clase' && (
                       <span className="flex items-center gap-1">
@@ -111,7 +125,49 @@ export default function DetailView() {
                         Resp: <span className="text-foreground font-medium">{parent.responsible}</span>
                       </span>
                     )}
+                    {parent?.startDate && parent.startDate !== '-' && (
+                      <span className="flex items-center gap-1">
+                        <Calendar className="h-3 w-3" />
+                        Inicio de plazo de ejecucion: <span className="text-foreground font-medium">{parent.startDate}</span>
+                      </span>
+                    )}
                   </div>
+
+                  {/* Carta Fianza / Poliza */}
+                  {guarantees.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground font-medium">
+                        <Shield className="h-3 w-3" />
+                        Cartas Fianza / Polizas:
+                      </span>
+                      <div className="grid gap-1 ml-4">
+                        {guarantees.map((g, i) => (
+                          <div key={i} className="text-xs text-muted-foreground flex flex-wrap gap-3">
+                            <span>Nro: <span className="text-foreground font-medium">{g.nroCarta}</span></span>
+                            <span>Monto: <span className="text-foreground font-mono">{fmt(g.monto)}</span></span>
+                            <span>Vigencia: <span className="text-foreground font-medium">{g.fechaVencimiento}</span></span>
+                            {g.detalle !== '-' && <span>({g.detalle})</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Adelanto */}
+                  {adelanto.total > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-4 text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1">
+                        <Banknote className="h-3 w-3" />
+                        Adelanto Contrato: <span className="text-foreground font-mono font-medium">{fmt(adelanto.total)}</span>
+                      </span>
+                      <span>
+                        Amortizacion: <span className="text-foreground font-mono font-medium">{fmt(adelanto.amort)}</span>
+                      </span>
+                      <span>
+                        Por Amortizar: <span className="text-orange-600 font-mono font-medium">{fmt(adelanto.pending)}</span>
+                      </span>
+                    </div>
+                  )}
                 </div>
               </CardHeader>
 
@@ -121,15 +177,17 @@ export default function DetailView() {
                   <Table>
                     <TableHeader>
                       <TableRow className="bg-muted/50">
-                        <TableHead className="w-[120px]">Adenda</TableHead>
-                        <TableHead className="text-right">Monto Contrato</TableHead>
+                        <TableHead className="w-[80px]">Adenda</TableHead>
+                        <TableHead className="text-right">Monto Contratado</TableHead>
+                        <TableHead className="text-right">Deductivo</TableHead>
+                        <TableHead className="text-right">Monto Neto</TableHead>
                         <TableHead className="text-right text-green-600">Pagos</TableHead>
                         <TableHead className="text-right">Provisiones</TableHead>
                         <TableHead className="text-right">O. Servicio</TableHead>
                         <TableHead className="text-right">O. Cambio</TableHead>
-                        <TableHead className="text-right">Garantías</TableHead>
-                        <TableHead className="text-right font-bold text-primary">Saldo</TableHead>
-                        <TableHead className="w-[50px]"></TableHead>
+                        <TableHead className="text-right">Garantias</TableHead>
+                        <TableHead className="text-right font-bold text-primary">Saldo x Pagar</TableHead>
+                        <TableHead className="w-[40px]"></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -137,25 +195,31 @@ export default function DetailView() {
                         <TableRow key={row.key} className="group hover:bg-muted/30 transition-colors">
                           <TableCell className="font-medium font-mono text-xs">{row.addendumId}</TableCell>
                           <TableCell className="text-right font-mono text-xs">
-                            {row.amount.toLocaleString('es-PE', { style: 'currency', currency: 'PEN' })}
+                            {fmt(row.amount)}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs text-muted-foreground">
+                            {row.deductivo ? fmt(row.deductivo) : '-'}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs font-medium">
+                            {fmt(row.amountNet)}
                           </TableCell>
                           <TableCell className="text-right font-mono text-xs text-green-700/80 font-medium">
-                            {row.payments.toLocaleString('es-PE', { style: 'currency', currency: 'PEN' })}
+                            {fmt(row.payments)}
                           </TableCell>
                           <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                            {row.provisions.toLocaleString('es-PE', { style: 'currency', currency: 'PEN' })}
+                            {fmt(row.provisions)}
                           </TableCell>
                           <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                            {row.serviceOrders.toLocaleString('es-PE', { style: 'currency', currency: 'PEN' })}
+                            {fmt(row.serviceOrders)}
                           </TableCell>
                           <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                            {row.changeOrders.toLocaleString('es-PE', { style: 'currency', currency: 'PEN' })}
+                            {fmt(row.changeOrders)}
                           </TableCell>
                           <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                            {row.guarantees.toLocaleString('es-PE', { style: 'currency', currency: 'PEN' })}
+                            {fmt(row.guarantees)}
                           </TableCell>
                           <TableCell className="text-right font-mono text-xs font-bold text-foreground">
-                            {row.balance.toLocaleString('es-PE', { style: 'currency', currency: 'PEN' })}
+                            {fmt(row.saldoPorPagar)}
                           </TableCell>
                           <TableCell>
                             {row.comments.length > 0 && (
