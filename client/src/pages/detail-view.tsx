@@ -174,6 +174,8 @@ export default function DetailView() {
                         <TableHead className="text-center">Fin</TableHead>
                         <TableHead className="text-center">Ampliacion Plazo</TableHead>
                         <TableHead className="text-right">Monto</TableHead>
+                        <TableHead className="text-right">Deductivo</TableHead>
+                        <TableHead className="text-right">Monto Neto</TableHead>
                         <TableHead className="min-w-[150px]">Observaciones</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -187,6 +189,10 @@ export default function DetailView() {
                           <TableCell className="text-xs text-center">{row.endDate || '-'}</TableCell>
                           <TableCell className="text-xs text-center">{row.extensionTerm && row.extensionTerm !== '-' ? row.extensionTerm : '-'}</TableCell>
                           <TableCell className="text-right font-mono text-xs">{fmt(row.amount)}</TableCell>
+                          <TableCell className="text-right font-mono text-xs text-muted-foreground">
+                            {row.deductivo ? fmt(row.deductivo) : '-'}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs font-medium">{fmt(row.amountNet)}</TableCell>
                           <TableCell className="text-xs text-muted-foreground max-w-[200px]" title={row.observaciones}>
                             {row.observaciones || '-'}
                           </TableCell>
@@ -200,6 +206,12 @@ export default function DetailView() {
                         <TableCell className="text-xs text-center">{subtotalFin}</TableCell>
                         <TableCell></TableCell>
                         <TableCell className="text-right font-mono text-xs font-bold">{fmt(subtotalMonto)}</TableCell>
+                        <TableCell className="text-right font-mono text-xs font-bold">
+                          {fmt(group.items.reduce((s, i) => s + i.deductivo, 0))}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs font-bold">
+                          {fmt(group.items.reduce((s, i) => s + i.amountNet, 0))}
+                        </TableCell>
                         <TableCell></TableCell>
                       </TableRow>
                     </TableBody>
@@ -217,9 +229,6 @@ export default function DetailView() {
                     <TableHeader>
                       <TableRow className="bg-muted/40">
                         <TableHead className="w-[60px]">Adenda</TableHead>
-                        <TableHead className="text-right">Monto Contratado</TableHead>
-                        <TableHead className="text-right">Deductivo</TableHead>
-                        <TableHead className="text-right">Monto Neto</TableHead>
                         <TableHead className="text-right text-green-600">Pagos</TableHead>
                         <TableHead className="text-right">Provisiones</TableHead>
                         <TableHead className="text-right">O. Servicio</TableHead>
@@ -232,11 +241,6 @@ export default function DetailView() {
                       {group.items.map((row) => (
                         <TableRow key={row.key} className="hover:bg-muted/30 transition-colors">
                           <TableCell className="font-mono text-xs font-medium">{row.addendumId}</TableCell>
-                          <TableCell className="text-right font-mono text-xs">{fmt(row.amount)}</TableCell>
-                          <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                            {row.deductivo ? fmt(row.deductivo) : '-'}
-                          </TableCell>
-                          <TableCell className="text-right font-mono text-xs font-medium">{fmt(row.amountNet)}</TableCell>
                           <TableCell className="text-right font-mono text-xs text-green-700/80 font-medium">{fmt(row.payments)}</TableCell>
                           <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(row.provisions)}</TableCell>
                           <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(row.serviceOrders)}</TableCell>
@@ -248,15 +252,6 @@ export default function DetailView() {
                       {/* Subtotal row */}
                       <TableRow className="bg-muted/50 font-medium">
                         <TableCell className="text-xs font-bold">Subtotal</TableCell>
-                        <TableCell className="text-right font-mono text-xs font-bold">
-                          {fmt(group.items.reduce((s, i) => s + i.amount, 0))}
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-xs font-bold">
-                          {fmt(group.items.reduce((s, i) => s + i.deductivo, 0))}
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-xs font-bold">
-                          {fmt(group.items.reduce((s, i) => s + i.amountNet, 0))}
-                        </TableCell>
                         <TableCell className="text-right font-mono text-xs font-bold text-green-700/80">
                           {fmt(group.items.reduce((s, i) => s + i.payments, 0))}
                         </TableCell>
