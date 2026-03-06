@@ -165,6 +165,8 @@ export interface PaymentRecord {
   factura: string;
   fechaContabilizacion: string;
   retencion: number;
+  amortizacionAdelanto: number;
+  isAdelanto: boolean; // true when VALORIZACION starts with "A"
 }
 
 export interface GuaranteeRecord {
@@ -197,6 +199,8 @@ export interface ContractData {
   company?: string;
   
   amount: number;
+  deductivo: number; // DEDUCTIVO Y MAYORES METRADOS US$ (SIN IGV)
+  amountNet: number; // CONTRATADO - DEDUCTIVO = valor real del contrato
   currency?: string;
   state?: string;
   type?: string; // Tipo de contrato
@@ -212,8 +216,12 @@ export interface ContractData {
   changeOrders: number;
   guarantees: number;
   retention: number; // RETENCION FG Y FC US$
+  adelantoContrato: number; // Adelanto de contrato (pagos con VALORIZACION que empieza con A)
+  amortizacionAdelanto: number; // Amortizacion del adelanto
+  adelantoPorAmortizar: number; // Adelanto - Amortizacion
   progress: number; // Avance
   balance: number; // Saldo
+  saldoPorPagar: number; // Saldo por pagar
   
   // SAP registration tracking
   registeredInSap: boolean; // From Con.SAP sheet
@@ -377,6 +385,12 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
             r['RETENCION TOTAL']
           );
 
+          const deductivo = parseNumber(
+            r['DEDUCTIVO Y MAYORES METRADOS US$ (SIN IGV)'] ||
+            r['DEDUCTIVO Y MAYORES METRADOS'] ||
+            r['DEDUCTIVO'] || 0
+          );
+
           contractsMap.set(key, {
             contractId: String(contractId),
             addendumId: String(addendumId),
@@ -391,6 +405,8 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
             responsible: String(r['RESPONSABLE (ADMINISTRADOR DE CONTRATO)'] || r['RESPONSABLE'] || '-'),
             company: String(r['EMPRESA'] || r['CONTRATISTA'] || '-'),
             amount: amount,
+            deductivo: deductivo,
+            amountNet: amount - deductivo,
             state: r['ESTADO'] || 'Activo',
             type: r['TIPO_CONTRATO'] || 'General',
             contractClass: r['CLASE CONTRATO'] || r['CLASE'] || 'Sin Clase',
@@ -403,8 +419,12 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
             changeOrders: 0,
             guarantees: 0,
             retention: retention,
+            adelantoContrato: 0,
+            amortizacionAdelanto: 0,
+            adelantoPorAmortizar: 0,
             progress: 0,
             balance: 0,
+            saldoPorPagar: 0,
             registeredInSap: false,
             paymentsList: [],
             guaranteesList: [],
@@ -470,8 +490,8 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
                    // Store detailed records for "Historial" block
                    if (conf.name === 'pagos') {
                       const retVal = parseNumber(
-                        r['RETENCION FG Y FC US$'] || 
-                        r['RETENCION FG Y FC'] || 
+                        r['RETENCION FG Y FC US$'] ||
+                        r['RETENCION FG Y FC'] ||
                         r['RETENCION'] ||
                         r['RETENCION TOTAL']
                       );
@@ -479,13 +499,30 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
                         contract.retention += retVal;
                       }
 
+                      const valorizacionId = String(r['VALORIZACIÓN #'] || r['VALORIZACION'] || r['N° VALORIZACION'] || '-').trim();
+                      const isAdelanto = /^A/i.test(valorizacionId);
+                      const amortAdelanto = parseNumber(
+                        r['AMORTIZACION DEL ADELANTO'] ||
+                        r['AMORTIZACION ADELANTO'] ||
+                        r['AMORT. ADELANTO'] || 0
+                      );
+
+                      if (isAdelanto) {
+                        contract.adelantoContrato += val;
+                      }
+                      if (amortAdelanto) {
+                        contract.amortizacionAdelanto += amortAdelanto;
+                      }
+
                       contract.paymentsList.push({
-                        valorizacion: r['VALORIZACIÓN #'] || r['VALORIZACION'] || r['N° VALORIZACION'] || '-',
+                        valorizacion: valorizacionId,
                         descripcion: r['VAL DESCRIPCION'] || r['DESCRIPCION'] || '-',
                         monto: val,
                         factura: r['FACTURA'] || '-',
                         fechaContabilizacion: parseExcelDate(r['FECHA CONTABILIZACION'] || r['FECHA PAGO']),
-                        retencion: retVal || 0
+                        retencion: retVal || 0,
+                        amortizacionAdelanto: amortAdelanto,
+                        isAdelanto,
                       });
                    } else if (conf.name === 'garantias') {
                       contract.guaranteesList.push({
@@ -556,6 +593,8 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
         
         contractsMap.forEach(c => {
           c.balance = c.amount - c.payments;
+          c.adelantoPorAmortizar = c.adelantoContrato - c.amortizacionAdelanto;
+          c.saldoPorPagar = c.amountNet - c.payments;
         });
 
         result.contracts = Array.from(contractsMap.values());
