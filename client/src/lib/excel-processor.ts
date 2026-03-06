@@ -197,6 +197,7 @@ export interface ContractData {
   extensionTerm?: string;
   responsible?: string;
   company?: string;
+  observaciones?: string; // OBSERVACIONES from 1Contratos
   
   amount: number;
   deductivo: number; // DEDUCTIVO Y MAYORES METRADOS US$ (SIN IGV)
@@ -404,6 +405,7 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
             endDate: parseExcelDate(r['FECHA RECEPCIÓN PROVISIONAL / FIN SEGÚN CONTRATO (ULTIMA)'] || r['FECHA FIN'] || r['FIN']),
             responsible: String(r['RESPONSABLE (ADMINISTRADOR DE CONTRATO)'] || r['RESPONSABLE'] || '-'),
             company: String(r['EMPRESA'] || r['CONTRATISTA'] || '-'),
+            observaciones: r['OBSERVACIONES'] || '',
             amount: amount,
             deductivo: deductivo,
             amountNet: amount - deductivo,
