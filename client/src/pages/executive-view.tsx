@@ -49,10 +49,15 @@ export default function ExecutiveView() {
   // Suma de Retención (Pagos) + Garantías (Cartas Fianza)
   const totalRetentionAndGuarantees = filteredByClassConsolidated.reduce((acc, c) => acc + c.totalRetention + c.totalGuarantees, 0);
   
-  // Status Counts
-  const activeContracts = filteredByClassConsolidated.filter(c => c.state?.toLowerCase().includes('activo') || c.state?.toLowerCase().includes('ejecucion')).length;
-  const closedContracts = filteredByClassConsolidated.filter(c => c.state?.toLowerCase().includes('cerrado') || c.state?.toLowerCase().includes('liquidado')).length;
-  const warrantyContracts = filteredByClassConsolidated.filter(c => c.state?.toLowerCase().includes('garantia')).length;
+  // Status Counts - desglose individual por estado
+  const contractsByStatus = useMemo(() => {
+    const statusMap: Record<string, number> = {};
+    filteredByClassConsolidated.forEach(c => {
+      const state = c.state?.trim() || 'Sin Estado';
+      statusMap[state] = (statusMap[state] || 0) + 1;
+    });
+    return Object.entries(statusMap).sort((a, b) => b[1] - a[1]);
+  }, [filteredByClassConsolidated]);
   
   // Chart Data: Investment by Type vs Group (Filtered by Class)
   const investmentMap = useMemo(() => {
@@ -276,23 +281,17 @@ export default function ExecutiveView() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Estado Contratos</CardTitle>
+            <CardTitle className="text-sm font-medium">Estado Contratos ({filteredByClassConsolidated.length})</CardTitle>
             <FileText className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-3 gap-1 text-center">
-              <div>
-                <div className="text-lg font-bold">{activeContracts}</div>
-                <div className="text-[10px] text-muted-foreground">Activos</div>
-              </div>
-              <div>
-                <div className="text-lg font-bold">{closedContracts}</div>
-                <div className="text-[10px] text-muted-foreground">Cerrados</div>
-              </div>
-              <div>
-                <div className="text-lg font-bold">{warrantyContracts}</div>
-                <div className="text-[10px] text-muted-foreground">Garantía</div>
-              </div>
+            <div className={`grid gap-1 text-center`} style={{ gridTemplateColumns: `repeat(${Math.min(contractsByStatus.length, 4)}, 1fr)` }}>
+              {contractsByStatus.map(([state, count]) => (
+                <div key={state}>
+                  <div className="text-lg font-bold">{count}</div>
+                  <div className="text-[10px] text-muted-foreground leading-tight">{state}</div>
+                </div>
+              ))}
             </div>
           </CardContent>
         </Card>
