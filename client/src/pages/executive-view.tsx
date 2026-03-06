@@ -107,12 +107,12 @@ export default function ExecutiveView() {
   };
 
   // Helper: classify raw ESTADO into main category
+  // EJECUCION = solo "EJECUCION", CERRADOS = solo "CERRADO/CERRADOS", todo lo demás = FINIQUITO
   const getMainStateCategory = (state: string): string => {
     const s = state.toUpperCase().trim();
-    if (s.includes('EJECUCI') || s === 'ACTIVO') return 'EJECUCION';
-    if (s.includes('FINIQUITO')) return 'FINIQUITO';
-    if (s.includes('CERRAD')) return 'CERRADOS';
-    return 'OTROS';
+    if (s === 'EJECUCION' || s === 'EN EJECUCION') return 'EJECUCION';
+    if (s === 'CERRADO' || s === 'CERRADOS') return 'CERRADOS';
+    return 'FINIQUITO';
   };
 
   // Chart Data: Contracts grouped by Estado (main category → sub-states with amounts)
@@ -128,7 +128,7 @@ export default function ExecutiveView() {
       categoryMap[main][raw].amount += c.totalAmount;
     });
 
-    const order = ['EJECUCION', 'FINIQUITO', 'CERRADOS', 'OTROS'];
+    const order = ['EJECUCION', 'FINIQUITO', 'CERRADOS'];
     const subStatesSet = new Set<string>();
 
     const data = order
