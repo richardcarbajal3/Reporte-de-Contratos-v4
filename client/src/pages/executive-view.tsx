@@ -3,7 +3,7 @@ import { useAppStore } from "@/store";
 import { Layout } from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip, Cell, PieChart, Pie, Legend } from "recharts";
-import { DollarSign, FileText, Activity, TrendingUp, ShieldCheck, Lock, ChevronDown, FilterX, Calendar, Clock, AlertTriangle, FileCheck, ArrowRight, Check, Printer } from "lucide-react";
+import { DollarSign, FileText, Activity, TrendingUp, ShieldCheck, Lock, ChevronDown, FilterX, Calendar, Clock, AlertTriangle, FileCheck, ArrowRight, Check, Printer, Shield, Banknote, Tag, Building2, User } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
@@ -85,9 +85,19 @@ export default function ExecutiveView() {
       });
   }, [filteredByClassConsolidated, selectedCategories, viewMode]);
 
-  const selectedContractDetails = selectedContractId 
-    ? consolidated.find(c => c.contractId === selectedContractId) 
+  const selectedContractDetails = selectedContractId
+    ? consolidated.find(c => c.contractId === selectedContractId)
     : null;
+
+  // Detail dialog helpers
+  const fmt = (n: number) => n.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const getParentInfo = (items: typeof contracts) => items.find(i => i.addendumId === '0') || items[0];
+  const getGroupGuarantees = (items: typeof contracts) => items.flatMap(i => i.guaranteesList);
+  const getGroupAdelanto = (items: typeof contracts) => {
+    const total = items.reduce((s, i) => s + i.adelantoContrato, 0);
+    const amort = items.reduce((s, i) => s + i.amortizacionAdelanto, 0);
+    return { total, amort, pending: total - amort };
+  };
 
   // Chart Data: Top Contracts (Filtered by Class)
   const topContractsData = [...filteredByClassConsolidated]
@@ -526,7 +536,7 @@ export default function ExecutiveView() {
 
       {/* Detailed Contract Modal/Dialog */}
       <Dialog open={!!selectedContractId} onOpenChange={(open) => !open && setSelectedContractId(null)}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto print:max-w-full print:max-h-full print:h-auto print:overflow-visible">
+        <DialogContent className="max-w-7xl max-h-[90vh] overflow-y-auto print:max-w-full print:max-h-full print:h-auto print:overflow-visible">
           <DialogHeader className="print:hidden">
             <DialogTitle className="text-2xl font-heading flex items-center gap-2">
               <FileText className="h-6 w-6 text-primary" />
@@ -537,224 +547,218 @@ export default function ExecutiveView() {
             </DialogDescription>
           </DialogHeader>
 
-          {selectedContractDetails && (
-             <div className="space-y-6">
-                {/* Summary Stats */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-muted/30 rounded-lg border">
-                   <div>
-                      <div className="text-xs text-muted-foreground">Monto Total</div>
-                      <div className="font-mono font-bold text-lg">
-                        {selectedContractDetails.totalAmount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+          {selectedContractDetails && (() => {
+            const parent = getParentInfo(selectedContractDetails.items);
+            const guarantees = getGroupGuarantees(selectedContractDetails.items);
+            const adelanto = getGroupAdelanto(selectedContractDetails.items);
+            const subtotalInicio = selectedContractDetails.items.find(i => i.startDate && i.startDate !== '-')?.startDate || '-';
+            const subtotalFin = selectedContractDetails.items.find(i => i.endDate && i.endDate !== '-')?.endDate || '-';
+            const subtotalMonto = selectedContractDetails.items.reduce((s, i) => s + i.amount, 0);
+
+            return (
+             <div className="space-y-0">
+                {/* ============ BLOQUE 1: Data General ============ */}
+                <div className="pb-3 border-b bg-muted/30 rounded-t-lg px-4 py-3">
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-lg font-heading font-bold">
+                        Contrato Padre: <span className="font-mono">{selectedContractDetails.contractId}</span>
+                      </span>
+                      <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+                        selectedContractDetails.state === 'Activo' ? 'bg-green-100 text-green-700' :
+                        selectedContractDetails.state === 'Cerrado' ? 'bg-gray-100 text-gray-600' :
+                        'bg-yellow-100 text-yellow-700'
+                      }`}>
+                        {selectedContractDetails.state}
+                      </span>
+                    </div>
+
+                    {parent?.description && (
+                      <p className="text-sm text-foreground">{parent.description}</p>
+                    )}
+                    {parent?.chineseDescription && (
+                      <p className="text-sm text-muted-foreground italic">{parent.chineseDescription}</p>
+                    )}
+
+                    <div className="flex flex-wrap gap-4 text-xs text-muted-foreground mt-1">
+                      {parent?.contractClass && parent.contractClass !== 'Sin Clase' && (
+                        <span className="flex items-center gap-1">
+                          <Tag className="h-3 w-3" />
+                          Clase: <span className="text-foreground font-medium">{parent.contractClass}</span>
+                        </span>
+                      )}
+                      {parent?.company && parent.company !== '-' && (
+                        <span className="flex items-center gap-1">
+                          <Building2 className="h-3 w-3" />
+                          Empresa: <span className="text-foreground font-medium">{parent.company}</span>
+                        </span>
+                      )}
+                      {parent?.responsible && parent.responsible !== '-' && (
+                        <span className="flex items-center gap-1">
+                          <User className="h-3 w-3" />
+                          Resp: <span className="text-foreground font-medium">{parent.responsible}</span>
+                        </span>
+                      )}
+                    </div>
+
+                    {guarantees.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        <span className="flex items-center gap-1 text-xs text-muted-foreground font-medium">
+                          <Shield className="h-3 w-3" />
+                          Cartas Fianza / Polizas:
+                        </span>
+                        <div className="grid gap-1 ml-4">
+                          {guarantees.map((g, i) => (
+                            <div key={i} className="text-xs text-muted-foreground flex flex-wrap gap-3">
+                              <span>Nro: <span className="text-foreground font-medium">{g.nroCarta}</span></span>
+                              <span>Monto: <span className="text-foreground font-mono">{fmt(g.monto)}</span></span>
+                              <span>Vigencia: <span className="text-foreground font-medium">{g.fechaVencimiento}</span></span>
+                              {g.detalle !== '-' && <span>({g.detalle})</span>}
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                   </div>
-                   <div>
-                      <div className="text-xs text-muted-foreground">Pagado</div>
-                      <div className="font-mono font-bold text-lg text-green-600">
-                        {selectedContractDetails.totalPaid.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                    )}
+
+                    {adelanto.total > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-4 text-xs text-muted-foreground">
+                        <span className="flex items-center gap-1">
+                          <Banknote className="h-3 w-3" />
+                          Adelanto Contrato: <span className="text-foreground font-mono font-medium">{fmt(adelanto.total)}</span>
+                        </span>
+                        <span>
+                          Amortizacion: <span className="text-foreground font-mono font-medium">{fmt(adelanto.amort)}</span>
+                        </span>
+                        <span>
+                          Por Amortizar: <span className="text-orange-600 font-mono font-medium">{fmt(adelanto.pending)}</span>
+                        </span>
                       </div>
-                   </div>
-                   <div>
-                      <div className="text-xs text-muted-foreground">Custodia Total</div>
-                      <div className="font-mono font-bold text-lg text-orange-600">
-                        {(selectedContractDetails.totalRetention + selectedContractDetails.totalGuarantees).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
-                      </div>
-                      <div className="text-[10px] text-muted-foreground">
-                        (Ret: {selectedContractDetails.totalRetention.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })} + Gar: {selectedContractDetails.totalGuarantees.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })})
-                      </div>
-                   </div>
-                   <div>
-                      <div className="text-xs text-muted-foreground">Avance Ponderado</div>
-                      <div className="font-mono font-bold text-lg">
-                        {(selectedContractDetails.progressPercent).toFixed(1)}%
-                      </div>
-                   </div>
+                    )}
+                  </div>
                 </div>
 
-                <Separator />
-                
-                {/* Addendums List */}
+                {/* ============ BLOQUE 2: Detalle Contractual ============ */}
+                <div className="border-b">
+                  <div className="px-4 py-2 bg-muted/20">
+                    <h4 className="text-sm font-medium text-foreground">Detalle Contractual</h4>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-muted/40">
+                          <TableHead className="w-[120px]">Contrato / Adenda</TableHead>
+                          <TableHead className="min-w-[180px]">Descripcion</TableHead>
+                          <TableHead className="text-center">Inicio Plazo</TableHead>
+                          <TableHead className="text-center">Plazo</TableHead>
+                          <TableHead className="text-center">Fin</TableHead>
+                          <TableHead className="text-center">Ampliacion Plazo</TableHead>
+                          <TableHead className="text-right">Monto</TableHead>
+                          <TableHead className="text-right">Deductivo</TableHead>
+                          <TableHead className="text-right">Monto Neto</TableHead>
+                          <TableHead className="min-w-[150px]">Observaciones</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {selectedContractDetails.items.map((row) => (
+                          <TableRow key={row.key} className="hover:bg-muted/30 transition-colors">
+                            <TableCell className="text-xs font-medium">
+                              {row.addendumId === '0' ? 'Contrato' : `Adenda ${row.addendumId}`}
+                            </TableCell>
+                            <TableCell className="text-xs">{row.description || '-'}</TableCell>
+                            <TableCell className="text-xs text-center">{row.startDate || '-'}</TableCell>
+                            <TableCell className="text-xs text-center">{row.executionTerm || '-'}</TableCell>
+                            <TableCell className="text-xs text-center">{row.endDate || '-'}</TableCell>
+                            <TableCell className="text-xs text-center">{row.extensionTerm && row.extensionTerm !== '-' ? row.extensionTerm : '-'}</TableCell>
+                            <TableCell className="text-right font-mono text-xs">{fmt(row.amount)}</TableCell>
+                            <TableCell className="text-right font-mono text-xs text-muted-foreground">
+                              {row.deductivo ? fmt(row.deductivo) : '-'}
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-xs font-medium">{fmt(row.amountNet)}</TableCell>
+                            <TableCell className="text-xs text-muted-foreground max-w-[200px]" title={row.observaciones}>
+                              {row.observaciones || '-'}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        <TableRow className="bg-muted/50 font-medium">
+                          <TableCell className="text-xs font-bold" colSpan={2}>Subtotal</TableCell>
+                          <TableCell className="text-xs text-center">{subtotalInicio}</TableCell>
+                          <TableCell></TableCell>
+                          <TableCell className="text-xs text-center">{subtotalFin}</TableCell>
+                          <TableCell></TableCell>
+                          <TableCell className="text-right font-mono text-xs font-bold">{fmt(subtotalMonto)}</TableCell>
+                          <TableCell className="text-right font-mono text-xs font-bold">
+                            {fmt(selectedContractDetails.items.reduce((s, i) => s + i.deductivo, 0))}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs font-bold">
+                            {fmt(selectedContractDetails.items.reduce((s, i) => s + i.amountNet, 0))}
+                          </TableCell>
+                          <TableCell></TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+
+                {/* ============ BLOQUE 3: Detalle de Pagos ============ */}
                 <div>
-                   <h4 className="text-sm font-bold mb-3 flex items-center gap-2">
-                     <Clock className="h-4 w-4" /> Historial de Adendas
-                   </h4>
-                   <div className="space-y-4">
-                      {selectedContractDetails.items.sort((a,b) => a.addendumId.localeCompare(b.addendumId)).map(item => (
-                         <div key={item.key} className="p-4 rounded-lg border bg-card hover:shadow-md transition-shadow">
-                            <div className="flex justify-between items-start mb-2">
-                               <div>
-                                  <Badge variant={item.addendumId === '0' ? "default" : "secondary"}>
-                                     {item.addendumId === '0' ? 'Contrato Primigenio' : `Adenda ${item.addendumId}`}
-                                  </Badge>
-                                  <h5 className="font-bold mt-1 text-sm">{item.description}</h5>
-                                  {item.chineseDescription && (
-                                    <p className="text-xs text-muted-foreground mt-0.5 font-medium">{item.chineseDescription}</p>
-                                  )}
-                                  <div className="flex flex-wrap gap-2 mt-2">
-                                    <Badge variant="outline" className="text-[10px] text-muted-foreground font-normal bg-muted/20">
-                                      Clase: {item.contractClass || 'N/A'}
-                                    </Badge>
-                                    <Badge variant="outline" className="text-[10px] text-muted-foreground font-normal bg-muted/20">
-                                      Empresa: {item.company || '-'}
-                                    </Badge>
-                                    <Badge variant="outline" className="text-[10px] text-muted-foreground font-normal bg-muted/20">
-                                      Resp: {item.responsible || '-'}
-                                    </Badge>
-                                  </div>
-                               </div>
-                               <div className="text-right flex-shrink-0 ml-4">
-                                  <div className="text-xs text-muted-foreground">Monto</div>
-                                  <div className="font-mono font-bold text-sm">
-                                    {item.amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
-                                  </div>
-                               </div>
-                            </div>
-
-                            <Separator className="my-3" />
-                            
-                            {/* Dates Grid */}
-                            <div className="grid grid-cols-2 md:grid-cols-5 gap-y-2 gap-x-4 text-[10px] mb-3 bg-muted/20 p-2 rounded">
-                               <div>
-                                  <span className="text-muted-foreground">F. Suscripción:</span> <br/>
-                                  <span className="font-medium">{item.contractDate || '-'}</span>
-                               </div>
-                               <div>
-                                  <span className="text-muted-foreground">Inicio Obra:</span> <br/>
-                                  <span className="font-medium">{item.startDate || '-'}</span>
-                               </div>
-                               <div>
-                                  <span className="text-muted-foreground">Plazo Ejec.:</span> <br/>
-                                  <span className="font-medium">{item.executionTerm || '-'}</span>
-                               </div>
-                               <div>
-                                  <span className="text-muted-foreground">Ampliación:</span> <br/>
-                                  <span className="font-medium">{item.extensionTerm || '-'}</span>
-                               </div>
-                               <div>
-                                  <span className="text-muted-foreground">Fin (Recepción):</span> <br/>
-                                  <span className="font-medium">{item.endDate || '-'}</span>
-                               </div>
-                            </div>
-                            
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-y-2 gap-x-4 text-xs mt-3">
-                               <div>
-                                  <span className="text-muted-foreground">Pagado Acumulado:</span> <br/>
-                                  <span className="font-mono">{item.payments.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</span>
-                               </div>
-                               <div>
-                                  <span className="text-muted-foreground">Retención Acumulada:</span> <br/>
-                                  <span className="font-mono text-orange-600">{item.retention.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</span>
-                               </div>
-                               <div>
-                                  <span className="text-muted-foreground">O. Servicio:</span> <br/>
-                                  <span className="font-mono">{item.serviceOrders.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</span>
-                               </div>
-                               <div>
-                                  <span className="text-muted-foreground">O. Cambio:</span> <br/>
-                                  <span className="font-mono">{item.changeOrders.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</span>
-                               </div>
-                               <div>
-                                  <span className="text-muted-foreground">Provisionado Acumulado:</span> <br/>
-                                  <span className="font-mono">{item.provisions.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</span>
-                               </div>
-                               <div>
-                                  <span className="text-muted-foreground">Garantías Fianza:</span> <br/>
-                                  <span className="font-mono text-orange-600">{item.guarantees.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</span>
-                               </div>
-                               <div>
-                                  <span className="text-muted-foreground">Avance Físico:</span> <br/>
-                                  <span className="font-mono font-bold">{(item.progress).toFixed(1)}%</span>
-                               </div>
-                            </div>
-                            
-                            {/* Payments Table */}
-                            {item.paymentsList && item.paymentsList.length > 0 && (
-                              <div className="mt-4 border rounded-md overflow-hidden">
-                                <div className="bg-muted px-3 py-1.5 text-xs font-semibold text-muted-foreground flex items-center gap-2">
-                                  <Activity className="h-3 w-3" /> Historial de Pagos
-                                </div>
-                                <div className="overflow-x-auto">
-                                  <Table>
-                                    <TableHeader>
-                                      <TableRow className="bg-muted/30 hover:bg-muted/30">
-                                        <TableHead className="text-[10px] h-7 px-2">Valorización #</TableHead>
-                                        <TableHead className="text-[10px] h-7 px-2">Descripción</TableHead>
-                                        <TableHead className="text-[10px] h-7 px-2 text-right">Valor Sin IGV</TableHead>
-                                        <TableHead className="text-[10px] h-7 px-2">Factura</TableHead>
-                                        <TableHead className="text-[10px] h-7 px-2">Fecha Contab.</TableHead>
-                                        <TableHead className="text-[10px] h-7 px-2 text-right">Retención FG/FC</TableHead>
-                                      </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                      {item.paymentsList.map((p, i) => (
-                                        <TableRow key={i} className="hover:bg-muted/50">
-                                          <TableCell className="text-[10px] p-2 whitespace-nowrap">{p.valorizacion}</TableCell>
-                                          <TableCell className="text-[10px] p-2 truncate max-w-[150px]" title={p.descripcion}>{p.descripcion}</TableCell>
-                                          <TableCell className="text-[10px] p-2 text-right font-mono">{p.monto.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</TableCell>
-                                          <TableCell className="text-[10px] p-2">{p.factura}</TableCell>
-                                          <TableCell className="text-[10px] p-2">{p.fechaContabilizacion}</TableCell>
-                                          <TableCell className="text-[10px] p-2 text-right font-mono text-orange-600">{p.retencion.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</TableCell>
-                                        </TableRow>
-                                      ))}
-                                    </TableBody>
-                                  </Table>
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Guarantees Table */}
-                            {item.guaranteesList && item.guaranteesList.length > 0 && (
-                              <div className="mt-4 border rounded-md overflow-hidden">
-                                <div className="bg-muted px-3 py-1.5 text-xs font-semibold text-muted-foreground flex items-center gap-2">
-                                  <ShieldCheck className="h-3 w-3" /> Cartas Fianza en Custodia
-                                </div>
-                                <div className="overflow-x-auto">
-                                  <Table>
-                                    <TableHeader>
-                                      <TableRow className="bg-muted/30 hover:bg-muted/30">
-                                        <TableHead className="text-[10px] h-7 px-2">Nro Carta</TableHead>
-                                        <TableHead className="text-[10px] h-7 px-2">Entidad</TableHead>
-                                        <TableHead className="text-[10px] h-7 px-2">Detalle</TableHead>
-                                        <TableHead className="text-[10px] h-7 px-2">Emisión</TableHead>
-                                        <TableHead className="text-[10px] h-7 px-2">Vencimiento</TableHead>
-                                        <TableHead className="text-[10px] h-7 px-2 text-right">Monto (US$)</TableHead>
-                                      </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                      {item.guaranteesList.map((g, i) => (
-                                        <TableRow key={i} className="hover:bg-muted/50">
-                                          <TableCell className="text-[10px] p-2">{g.nroCarta}</TableCell>
-                                          <TableCell className="text-[10px] p-2">{g.entidad}</TableCell>
-                                          <TableCell className="text-[10px] p-2 truncate max-w-[150px]" title={g.detalle}>{g.detalle}</TableCell>
-                                          <TableCell className="text-[10px] p-2">{g.fechaEmision}</TableCell>
-                                          <TableCell className="text-[10px] p-2">{g.fechaVencimiento}</TableCell>
-                                          <TableCell className="text-[10px] p-2 text-right font-mono text-orange-600">{g.monto.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</TableCell>
-                                        </TableRow>
-                                      ))}
-                                    </TableBody>
-                                  </Table>
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Provisions Summary */}
-                            {item.provisionsList && item.provisionsList.length > 0 && (
-                              <div className="mt-4 p-2 bg-blue-50/50 border border-blue-100 rounded text-xs flex justify-between items-center">
-                                <span className="text-blue-800 font-medium">Saldo de Provisiones (Sin IGV US$):</span>
-                                <span className="font-mono font-bold text-blue-900">{item.provisionsList.reduce((acc, p) => acc + p.monto, 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</span>
-                              </div>
-                            )}
-                            
-                            {item.comments.length > 0 && (
-                               <div className="mt-3 p-2 bg-yellow-50/50 border border-yellow-100 rounded text-[10px] text-yellow-800">
-                                  <strong>Notas:</strong> {item.comments.join(', ')}
-                               </div>
-                            )}
-                         </div>
-                      ))}
-                   </div>
+                  <div className="px-4 py-2 bg-muted/20">
+                    <h4 className="text-sm font-medium text-foreground">Detalle de Pagos y Financiero</h4>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-muted/40">
+                          <TableHead className="w-[120px]">Contrato / Adenda</TableHead>
+                          <TableHead className="text-right text-green-600">Pagos</TableHead>
+                          <TableHead className="text-right">Provisiones</TableHead>
+                          <TableHead className="text-right">O. Servicio</TableHead>
+                          <TableHead className="text-right">O. Cambio</TableHead>
+                          <TableHead className="text-right">Garantias</TableHead>
+                          <TableHead className="text-right font-bold text-primary">Saldo x Pagar</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {selectedContractDetails.items.map((row) => (
+                          <TableRow key={row.key} className="hover:bg-muted/30 transition-colors">
+                            <TableCell className="text-xs font-medium">
+                              {row.addendumId === '0' ? 'Contrato' : `Adenda ${row.addendumId}`}
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-xs text-green-700/80 font-medium">{fmt(row.payments)}</TableCell>
+                            <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(row.provisions)}</TableCell>
+                            <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(row.serviceOrders)}</TableCell>
+                            <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(row.changeOrders)}</TableCell>
+                            <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(row.guarantees)}</TableCell>
+                            <TableCell className="text-right font-mono text-xs font-bold">{fmt(row.saldoPorPagar)}</TableCell>
+                          </TableRow>
+                        ))}
+                        <TableRow className="bg-muted/50 font-medium">
+                          <TableCell className="text-xs font-bold">Subtotal</TableCell>
+                          <TableCell className="text-right font-mono text-xs font-bold text-green-700/80">
+                            {fmt(selectedContractDetails.items.reduce((s, i) => s + i.payments, 0))}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs font-bold">
+                            {fmt(selectedContractDetails.items.reduce((s, i) => s + i.provisions, 0))}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs font-bold">
+                            {fmt(selectedContractDetails.items.reduce((s, i) => s + i.serviceOrders, 0))}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs font-bold">
+                            {fmt(selectedContractDetails.items.reduce((s, i) => s + i.changeOrders, 0))}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs font-bold">
+                            {fmt(selectedContractDetails.items.reduce((s, i) => s + i.guarantees, 0))}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs font-bold">
+                            {fmt(selectedContractDetails.items.reduce((s, i) => s + i.saldoPorPagar, 0))}
+                          </TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </div>
                 </div>
              </div>
-          )}
+            );
+          })()}
         </DialogContent>
       </Dialog>
     </Layout>
