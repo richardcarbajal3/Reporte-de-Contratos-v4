@@ -3,15 +3,9 @@ import { Layout } from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Download, Info, Building2, User, Tag, Calendar, Shield, Banknote } from "lucide-react";
+import { Download, Building2, User, Tag, Calendar, Shield, Banknote } from "lucide-react";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 
 const fmt = (n: number) => n.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -48,12 +42,10 @@ export default function DetailView() {
     return items.find(i => i.addendumId === '0') || items[0];
   };
 
-  // Aggregate guarantees across all addendums for a group
   const getGroupGuarantees = (items: typeof contracts) => {
     return items.flatMap(i => i.guaranteesList);
   };
 
-  // Check if any item in group has adelanto
   const getGroupAdelanto = (items: typeof contracts) => {
     const total = items.reduce((s, i) => s + i.adelantoContrato, 0);
     const amort = items.reduce((s, i) => s + i.amortizacionAdelanto, 0);
@@ -79,9 +71,14 @@ export default function DetailView() {
           const guarantees = getGroupGuarantees(group.items);
           const adelanto = getGroupAdelanto(group.items);
 
+          // Subtotals for contract detail table
+          const subtotalInicio = group.items.find(i => i.startDate && i.startDate !== '-')?.startDate || '-';
+          const subtotalFin = group.items.find(i => i.endDate && i.endDate !== '-')?.endDate || '-';
+          const subtotalMonto = group.items.reduce((s, i) => s + i.amount, 0);
+
           return (
             <Card key={group.contractId}>
-              {/* Contract Parent Header */}
+              {/* ============ BLOQUE 1: Data General ============ */}
               <CardHeader className="pb-3 border-b bg-muted/30">
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center justify-between">
@@ -97,7 +94,6 @@ export default function DetailView() {
                     </span>
                   </div>
 
-                  {/* Description */}
                   {parent?.description && (
                     <p className="text-sm text-foreground">{parent.description}</p>
                   )}
@@ -105,7 +101,6 @@ export default function DetailView() {
                     <p className="text-sm text-muted-foreground italic">{parent.chineseDescription}</p>
                   )}
 
-                  {/* Metadata row 1: Clase, Empresa, Resp */}
                   <div className="flex flex-wrap gap-4 text-xs text-muted-foreground mt-1">
                     {parent?.contractClass && parent.contractClass !== 'Sin Clase' && (
                       <span className="flex items-center gap-1">
@@ -125,15 +120,8 @@ export default function DetailView() {
                         Resp: <span className="text-foreground font-medium">{parent.responsible}</span>
                       </span>
                     )}
-                    {parent?.startDate && parent.startDate !== '-' && (
-                      <span className="flex items-center gap-1">
-                        <Calendar className="h-3 w-3" />
-                        Inicio de plazo de ejecucion: <span className="text-foreground font-medium">{parent.startDate}</span>
-                      </span>
-                    )}
                   </div>
 
-                  {/* Carta Fianza / Poliza */}
                   {guarantees.length > 0 && (
                     <div className="mt-2 space-y-1">
                       <span className="flex items-center gap-1 text-xs text-muted-foreground font-medium">
@@ -153,7 +141,6 @@ export default function DetailView() {
                     </div>
                   )}
 
-                  {/* Adelanto */}
                   {adelanto.total > 0 && (
                     <div className="mt-2 flex flex-wrap gap-4 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1">
@@ -171,13 +158,65 @@ export default function DetailView() {
                 </div>
               </CardHeader>
 
-              {/* Addendums Table */}
-              <CardContent className="p-0">
+              {/* ============ BLOQUE 2: Detalle Contractual ============ */}
+              <CardContent className="p-0 border-b">
+                <div className="px-4 py-2 bg-muted/20">
+                  <h4 className="text-sm font-medium text-foreground">Detalle Contractual</h4>
+                </div>
                 <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
-                      <TableRow className="bg-muted/50">
-                        <TableHead className="w-[80px]">Adenda</TableHead>
+                      <TableRow className="bg-muted/40">
+                        <TableHead className="w-[60px]">Adenda</TableHead>
+                        <TableHead className="min-w-[180px]">Descripcion</TableHead>
+                        <TableHead className="text-center">Inicio Plazo</TableHead>
+                        <TableHead className="text-center">Plazo</TableHead>
+                        <TableHead className="text-center">Fin</TableHead>
+                        <TableHead className="text-center">Ampliacion Plazo</TableHead>
+                        <TableHead className="text-right">Monto</TableHead>
+                        <TableHead className="min-w-[150px]">Observaciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {group.items.map((row) => (
+                        <TableRow key={row.key} className="hover:bg-muted/30 transition-colors">
+                          <TableCell className="font-mono text-xs font-medium">{row.addendumId}</TableCell>
+                          <TableCell className="text-xs">{row.description || '-'}</TableCell>
+                          <TableCell className="text-xs text-center">{row.startDate || '-'}</TableCell>
+                          <TableCell className="text-xs text-center">{row.executionTerm || '-'}</TableCell>
+                          <TableCell className="text-xs text-center">{row.endDate || '-'}</TableCell>
+                          <TableCell className="text-xs text-center">{row.extensionTerm && row.extensionTerm !== '-' ? row.extensionTerm : '-'}</TableCell>
+                          <TableCell className="text-right font-mono text-xs">{fmt(row.amount)}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground max-w-[200px]" title={row.observaciones}>
+                            {row.observaciones || '-'}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {/* Subtotal row */}
+                      <TableRow className="bg-muted/50 font-medium">
+                        <TableCell className="text-xs font-bold" colSpan={2}>Subtotal</TableCell>
+                        <TableCell className="text-xs text-center">{subtotalInicio}</TableCell>
+                        <TableCell></TableCell>
+                        <TableCell className="text-xs text-center">{subtotalFin}</TableCell>
+                        <TableCell></TableCell>
+                        <TableCell className="text-right font-mono text-xs font-bold">{fmt(subtotalMonto)}</TableCell>
+                        <TableCell></TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+
+              {/* ============ BLOQUE 3: Detalle de Pagos ============ */}
+              <CardContent className="p-0">
+                <div className="px-4 py-2 bg-muted/20">
+                  <h4 className="text-sm font-medium text-foreground">Detalle de Pagos y Financiero</h4>
+                </div>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/40">
+                        <TableHead className="w-[60px]">Adenda</TableHead>
                         <TableHead className="text-right">Monto Contratado</TableHead>
                         <TableHead className="text-right">Deductivo</TableHead>
                         <TableHead className="text-right">Monto Neto</TableHead>
@@ -187,58 +226,56 @@ export default function DetailView() {
                         <TableHead className="text-right">O. Cambio</TableHead>
                         <TableHead className="text-right">Garantias</TableHead>
                         <TableHead className="text-right font-bold text-primary">Saldo x Pagar</TableHead>
-                        <TableHead className="w-[40px]"></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {group.items.map((row) => (
-                        <TableRow key={row.key} className="group hover:bg-muted/30 transition-colors">
-                          <TableCell className="font-medium font-mono text-xs">{row.addendumId}</TableCell>
-                          <TableCell className="text-right font-mono text-xs">
-                            {fmt(row.amount)}
-                          </TableCell>
+                        <TableRow key={row.key} className="hover:bg-muted/30 transition-colors">
+                          <TableCell className="font-mono text-xs font-medium">{row.addendumId}</TableCell>
+                          <TableCell className="text-right font-mono text-xs">{fmt(row.amount)}</TableCell>
                           <TableCell className="text-right font-mono text-xs text-muted-foreground">
                             {row.deductivo ? fmt(row.deductivo) : '-'}
                           </TableCell>
-                          <TableCell className="text-right font-mono text-xs font-medium">
-                            {fmt(row.amountNet)}
-                          </TableCell>
-                          <TableCell className="text-right font-mono text-xs text-green-700/80 font-medium">
-                            {fmt(row.payments)}
-                          </TableCell>
-                          <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                            {fmt(row.provisions)}
-                          </TableCell>
-                          <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                            {fmt(row.serviceOrders)}
-                          </TableCell>
-                          <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                            {fmt(row.changeOrders)}
-                          </TableCell>
-                          <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                            {fmt(row.guarantees)}
-                          </TableCell>
-                          <TableCell className="text-right font-mono text-xs font-bold text-foreground">
-                            {fmt(row.saldoPorPagar)}
-                          </TableCell>
-                          <TableCell>
-                            {row.comments.length > 0 && (
-                               <TooltipProvider>
-                                 <Tooltip>
-                                   <TooltipTrigger>
-                                     <Info className="h-4 w-4 text-blue-400" />
-                                   </TooltipTrigger>
-                                   <TooltipContent>
-                                     <div className="text-xs">
-                                       {row.comments.map((c, i) => <div key={i}>{c}</div>)}
-                                     </div>
-                                   </TooltipContent>
-                                 </Tooltip>
-                               </TooltipProvider>
-                            )}
-                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs font-medium">{fmt(row.amountNet)}</TableCell>
+                          <TableCell className="text-right font-mono text-xs text-green-700/80 font-medium">{fmt(row.payments)}</TableCell>
+                          <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(row.provisions)}</TableCell>
+                          <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(row.serviceOrders)}</TableCell>
+                          <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(row.changeOrders)}</TableCell>
+                          <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(row.guarantees)}</TableCell>
+                          <TableCell className="text-right font-mono text-xs font-bold">{fmt(row.saldoPorPagar)}</TableCell>
                         </TableRow>
                       ))}
+                      {/* Subtotal row */}
+                      <TableRow className="bg-muted/50 font-medium">
+                        <TableCell className="text-xs font-bold">Subtotal</TableCell>
+                        <TableCell className="text-right font-mono text-xs font-bold">
+                          {fmt(group.items.reduce((s, i) => s + i.amount, 0))}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs font-bold">
+                          {fmt(group.items.reduce((s, i) => s + i.deductivo, 0))}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs font-bold">
+                          {fmt(group.items.reduce((s, i) => s + i.amountNet, 0))}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs font-bold text-green-700/80">
+                          {fmt(group.items.reduce((s, i) => s + i.payments, 0))}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs font-bold">
+                          {fmt(group.items.reduce((s, i) => s + i.provisions, 0))}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs font-bold">
+                          {fmt(group.items.reduce((s, i) => s + i.serviceOrders, 0))}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs font-bold">
+                          {fmt(group.items.reduce((s, i) => s + i.changeOrders, 0))}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs font-bold">
+                          {fmt(group.items.reduce((s, i) => s + i.guarantees, 0))}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs font-bold">
+                          {fmt(group.items.reduce((s, i) => s + i.saldoPorPagar, 0))}
+                        </TableCell>
+                      </TableRow>
                     </TableBody>
                   </Table>
                 </div>
