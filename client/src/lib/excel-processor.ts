@@ -147,11 +147,15 @@ function normalizeWorkbook(workbook: XLSX.WorkBook): {
     resolutions.push({ canonicalName: canonical, actualName, headerRow });
   }
 
-  // Warn about unmapped sheets
+  // Warn about unmapped sheets (distinguish E_ specialized sheets)
   for (const name of workbook.SheetNames) {
     const alreadyMapped = resolutions.some(r => r.actualName === name);
     if (!alreadyMapped) {
-      warnings.push(`Hoja "${name}" no tiene mapeo conocido, ignorada.`);
+      if (/^E_/i.test(name)) {
+        warnings.push(`Hoja especializada "${name}" detectada (se procesara como datos adicionales).`);
+      } else {
+        warnings.push(`Hoja "${name}" no tiene mapeo conocido, ignorada.`);
+      }
     }
   }
 
@@ -180,6 +184,12 @@ export interface GuaranteeRecord {
 
 export interface ProvisionRecord {
   monto: number;
+}
+
+export interface SpecializedSheetEntry {
+  sheetType: string;          // e.g., "obras", "arrendamiento"
+  sheetLabel: string;         // Human-readable label
+  data: Record<string, any>;  // All columns as key-value pairs (excluding CONTRATO)
 }
 
 export interface ContractData {
@@ -234,6 +244,9 @@ export interface ContractData {
 
   records: Record<string, any>[];
   comments: string[]; // Aggregated comments
+
+  // Specialized sheet data (E_obras, E_arrendamiento, etc.)
+  specializedData: SpecializedSheetEntry[];
 }
 
 export interface ConsolidatedContract {
@@ -432,7 +445,8 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
             guaranteesList: [],
             provisionsList: [],
             records: [],
-            comments: r['COMENTARIOS'] ? [r['COMENTARIOS']] : []
+            comments: r['COMENTARIOS'] ? [r['COMENTARIOS']] : [],
+            specializedData: []
           });
         });
 
@@ -583,6 +597,58 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
           contractsMap.forEach(c => {
             if (sapContractIds.has(c.contractId)) {
               c.registeredInSap = true;
+            }
+          });
+        }
+
+        // 3b. Process Specialized Sheets (E_obras, E_arrendamiento, etc.)
+        // These are discovered from the RAW workbook since normalizeWorkbook discards unmapped sheets.
+        const eSheetNames = rawWorkbook.SheetNames.filter(name => /^E_/i.test(name));
+
+        for (const eSheetName of eSheetNames) {
+          const sheetType = eSheetName.replace(/^E_/i, '').toLowerCase();
+          const sheetLabel = sheetType.charAt(0).toUpperCase() + sheetType.slice(1);
+
+          const rawSheet = rawWorkbook.Sheets[eSheetName];
+          const eHeaderRow = detectHeaderRow(rawSheet, eSheetName);
+          const eRows = extractSheetData(rawSheet, eHeaderRow);
+
+          console.log(`Hoja especializada "${eSheetName}" detectada: ${eRows.length} filas, header en fila ${eHeaderRow + 1}`);
+
+          eRows.forEach((row: any) => {
+            const r = NORMALIZE_HEADERS(row);
+            const contractId = r['CONTRATO'] || r['N° CONTRATO'] || r['N CONTRATO'];
+            if (!contractId) return;
+
+            // Build data object from all non-identifier columns (use only uppercase keys to avoid dupes)
+            const data: Record<string, any> = {};
+            const skipKeys = new Set(['CONTRATO', 'N° CONTRATO', 'N CONTRATO', 'ADENDA']);
+            const seenKeys = new Set<string>();
+
+            for (const [key, value] of Object.entries(r)) {
+              const upperKey = key.trim().toUpperCase().replace(/\s+/g, ' ');
+              if (skipKeys.has(upperKey)) continue;
+              if (seenKeys.has(upperKey)) continue;
+              seenKeys.add(upperKey);
+              if (value !== null && value !== undefined && String(value).trim() !== '') {
+                data[upperKey] = value;
+              }
+            }
+
+            // Attach to addendum 0 (primary), fallback to first matching addendum
+            const primaryKey = `${contractId}-0`;
+            const primaryContract = contractsMap.get(primaryKey);
+            if (primaryContract) {
+              primaryContract.specializedData.push({ sheetType, sheetLabel, data });
+            } else {
+              // Fallback: find any addendum for this contract
+              let found = false;
+              contractsMap.forEach((c) => {
+                if (!found && c.contractId === String(contractId)) {
+                  c.specializedData.push({ sheetType, sheetLabel, data });
+                  found = true;
+                }
+              });
             }
           });
         }

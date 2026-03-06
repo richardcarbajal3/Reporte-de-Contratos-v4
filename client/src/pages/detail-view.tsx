@@ -2,12 +2,22 @@ import { useAppStore } from "@/store";
 import { Layout } from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Download, Building2, User, Tag, Calendar, Shield, Banknote } from "lucide-react";
+import { aggregateSpecializedData, type AggregatedField } from "@/lib/specialized-sheets-config";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 const fmt = (n: number) => n.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+const fmtField = (f: AggregatedField) => {
+  if (f.format === 'text') return String(f.value);
+  const num = Number(f.value);
+  if (f.format === 'currency') return num.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: f.decimals, maximumFractionDigits: f.decimals });
+  if (f.format === 'percent') return `${num.toFixed(f.decimals)}%`;
+  return num.toLocaleString('es-PE', { minimumFractionDigits: f.decimals, maximumFractionDigits: f.decimals });
+};
 
 export default function DetailView() {
   const consolidated = useAppStore(s => s.consolidated);
@@ -222,7 +232,7 @@ export default function DetailView() {
               </CardContent>
 
               {/* ============ BLOQUE 3: Detalle de Pagos ============ */}
-              <CardContent className="p-0">
+              <CardContent className="p-0 border-b">
                 <div className="px-4 py-2 bg-muted/20">
                   <h4 className="text-sm font-medium text-foreground">Detalle de Pagos y Financiero</h4>
                 </div>
@@ -279,6 +289,36 @@ export default function DetailView() {
                   </Table>
                 </div>
               </CardContent>
+
+              {/* ============ BLOQUE 4: Datos Adicionales (E_ Sheets) ============ */}
+              {(() => {
+                const specializedEntries = group.items.flatMap(i => i.specializedData);
+                if (specializedEntries.length === 0) return null;
+                const aggregated = aggregateSpecializedData(specializedEntries);
+                if (aggregated.length === 0) return null;
+                return (
+                  <CardContent className="p-0">
+                    <div className="px-4 py-2 bg-blue-50/50">
+                      <h4 className="text-sm font-medium text-foreground">Datos Adicionales</h4>
+                    </div>
+                    <div className="px-4 py-3 space-y-3">
+                      {aggregated.map((sheet) => (
+                        <div key={sheet.sheetType}>
+                          <Badge variant="secondary" className="text-[10px] mb-2">{sheet.label}</Badge>
+                          <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                            {sheet.fields.map((f) => (
+                              <div key={f.label} className="text-center p-1.5 rounded bg-muted/40 border">
+                                <div className="text-[9px] text-muted-foreground uppercase tracking-wide leading-tight">{f.label}</div>
+                                <div className="text-xs font-mono font-bold mt-0.5">{fmtField(f)}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                );
+              })()}
             </Card>
           );
         })}
