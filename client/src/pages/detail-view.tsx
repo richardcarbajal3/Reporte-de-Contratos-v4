@@ -167,7 +167,7 @@ export default function DetailView() {
                   <Table>
                     <TableHeader>
                       <TableRow className="bg-muted/40">
-                        <TableHead className="w-[60px]">Adenda</TableHead>
+                        <TableHead className="w-[120px]">Contrato / Adenda</TableHead>
                         <TableHead className="min-w-[180px]">Descripcion</TableHead>
                         <TableHead className="text-center">Inicio Plazo</TableHead>
                         <TableHead className="text-center">Plazo</TableHead>
@@ -182,7 +182,9 @@ export default function DetailView() {
                     <TableBody>
                       {group.items.map((row) => (
                         <TableRow key={row.key} className="hover:bg-muted/30 transition-colors">
-                          <TableCell className="font-mono text-xs font-medium">{row.addendumId}</TableCell>
+                          <TableCell className="text-xs font-medium">
+                            {row.addendumId === '0' ? 'Contrato' : `Adenda ${row.addendumId}`}
+                          </TableCell>
                           <TableCell className="text-xs">{row.description || '-'}</TableCell>
                           <TableCell className="text-xs text-center">{row.startDate || '-'}</TableCell>
                           <TableCell className="text-xs text-center">{row.executionTerm || '-'}</TableCell>
@@ -228,7 +230,7 @@ export default function DetailView() {
                   <Table>
                     <TableHeader>
                       <TableRow className="bg-muted/40">
-                        <TableHead className="w-[60px]">Adenda</TableHead>
+                        <TableHead className="w-[120px]">Contrato / Adenda</TableHead>
                         <TableHead className="text-right text-green-600">Pagos</TableHead>
                         <TableHead className="text-right">Provisiones</TableHead>
                         <TableHead className="text-right">O. Servicio</TableHead>
@@ -240,7 +242,9 @@ export default function DetailView() {
                     <TableBody>
                       {group.items.map((row) => (
                         <TableRow key={row.key} className="hover:bg-muted/30 transition-colors">
-                          <TableCell className="font-mono text-xs font-medium">{row.addendumId}</TableCell>
+                          <TableCell className="text-xs font-medium">
+                            {row.addendumId === '0' ? 'Contrato' : `Adenda ${row.addendumId}`}
+                          </TableCell>
                           <TableCell className="text-right font-mono text-xs text-green-700/80 font-medium">{fmt(row.payments)}</TableCell>
                           <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(row.provisions)}</TableCell>
                           <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(row.serviceOrders)}</TableCell>
