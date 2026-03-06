@@ -4,11 +4,11 @@ import * as XLSX from 'xlsx';
 // Sheet Name Aliases: maps canonical names to known internal aliases
 // ============================================================
 const SHEET_NAME_ALIASES: Record<string, string[]> = {
-  contratos:        ['Contratos'],
-  pagos:            ['Pago'],           // Pago = pagos ya realizados
-  programacion:     ['SAP'],            // SAP = programacion de pagos del proximo mes
-  provisiones:      ['Av&Provision', 'Provision'],
-  garantias:        ['Garantia', 'Garantias'],
+  contratos:        ['Contratos', '1Contratos'],
+  pagos:            ['Pago', '4Pago'],              // Pago = pagos ya realizados
+  programacion:     ['SAP', '2SAP'],                // SAP = programacion de pagos del proximo mes
+  provisiones:      ['Av&Provision', '3Av&Provision', 'Provision'],
+  garantias:        ['Garantia', '5Garantia', 'Garantias'],
   custodia:         ['C_Ent_Fin', 'Custodia'],
   ordenes_servicio: ['OS.r.SAP'],
   ordenes_cambio:   [],
