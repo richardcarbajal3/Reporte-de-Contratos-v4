@@ -13,6 +13,8 @@ import { Separator } from "@/components/ui/separator";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
+import { aggregateSpecializedData, type AggregatedSheetData, type AggregatedField } from "@/lib/specialized-sheets-config";
+import type { SpecializedSheetEntry } from "@/lib/excel-processor";
 
 export default function ExecutiveView() {
   const contracts = useAppStore(s => s.contracts);
@@ -113,6 +115,25 @@ export default function ExecutiveView() {
       amount: c.totalAmount,
       paid: c.totalPaid
     }));
+
+  // Format aggregated field values for display
+  const fmtField = (f: AggregatedField) => {
+    if (f.format === 'text') return String(f.value);
+    const num = Number(f.value);
+    if (f.format === 'currency') return num.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: f.decimals, maximumFractionDigits: f.decimals });
+    if (f.format === 'percent') return `${num.toFixed(f.decimals)}%`;
+    return num.toLocaleString('es-PE', { minimumFractionDigits: f.decimals, maximumFractionDigits: f.decimals });
+  };
+
+  // Compute aggregated specialized data for filtered contracts
+  const filteredSpecializedAggregation = useMemo((): AggregatedSheetData[] => {
+    if (filteredConsolidatedContracts.length === 0) return [];
+    const allEntries: SpecializedSheetEntry[] = filteredConsolidatedContracts.flatMap(c =>
+      c.items.flatMap(i => i.specializedData)
+    );
+    if (allEntries.length === 0) return [];
+    return aggregateSpecializedData(allEntries);
+  }, [filteredConsolidatedContracts]);
 
   const COLORS = ['hsl(221, 83%, 53%)', 'hsl(215, 25%, 27%)', 'hsl(200, 90%, 70%)', 'hsl(210, 20%, 90%)', '#F59E0B', '#10B981', '#6366F1', '#EC4899'];
 
@@ -530,6 +551,33 @@ export default function ExecutiveView() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Aggregated Specialized Data for Filtered Group */}
+          {filteredSpecializedAggregation.length > 0 && (
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              {filteredSpecializedAggregation.map((sheet) => (
+                <Card key={sheet.sheetType} className="border-dashed border-blue-300 bg-blue-50/30">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <Activity className="h-4 w-4 text-blue-600" />
+                      Datos Adicionales: {sheet.label}
+                    </CardTitle>
+                    <CardDescription className="text-xs">Agregado del grupo filtrado ({filteredConsolidatedContracts.length} contratos)</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {sheet.fields.map((f) => (
+                        <div key={f.label} className="text-center p-2 rounded-md bg-background border">
+                          <div className="text-[10px] text-muted-foreground uppercase tracking-wide">{f.label}</div>
+                          <div className="text-sm font-mono font-bold mt-1">{fmtField(f)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -550,6 +598,9 @@ export default function ExecutiveView() {
             const parent = getParentInfo(selectedContractDetails.items);
             const guarantees = getGroupGuarantees(selectedContractDetails.items);
             const adelanto = getGroupAdelanto(selectedContractDetails.items);
+            const contractSpecialized = aggregateSpecializedData(
+              selectedContractDetails.items.flatMap(i => i.specializedData)
+            );
             const subtotalInicio = selectedContractDetails.items.find(i => i.startDate && i.startDate !== '-')?.startDate || '-';
             const subtotalFin = selectedContractDetails.items.find(i => i.endDate && i.endDate !== '-')?.endDate || '-';
             const subtotalMonto = selectedContractDetails.items.reduce((s, i) => s + i.amount, 0);
@@ -755,6 +806,30 @@ export default function ExecutiveView() {
                     </Table>
                   </div>
                 </div>
+
+                {/* ============ BLOQUE 4: Datos Adicionales (E_ Sheets) ============ */}
+                {contractSpecialized.length > 0 && (
+                  <div className="border-t">
+                    <div className="px-4 py-2 bg-blue-50/50">
+                      <h4 className="text-sm font-medium text-foreground">Datos Adicionales</h4>
+                    </div>
+                    <div className="px-4 py-3 space-y-3">
+                      {contractSpecialized.map((sheet) => (
+                        <div key={sheet.sheetType}>
+                          <Badge variant="secondary" className="text-[10px] mb-2">{sheet.label}</Badge>
+                          <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                            {sheet.fields.map((f) => (
+                              <div key={f.label} className="text-center p-1.5 rounded bg-muted/40 border">
+                                <div className="text-[9px] text-muted-foreground uppercase tracking-wide leading-tight">{f.label}</div>
+                                <div className="text-xs font-mono font-bold mt-0.5">{fmtField(f)}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
              </div>
             );
           })()}
