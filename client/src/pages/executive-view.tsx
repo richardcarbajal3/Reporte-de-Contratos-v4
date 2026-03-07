@@ -168,9 +168,12 @@ export default function ExecutiveView() {
     return aggregateSpecializedData(allEntries);
   }, [filteredConsolidatedContracts]);
 
-  // Monthly payments aggregation
-  const monthlyPaymentsData = useMemo(() => {
-    const monthMap: Record<string, { month: string; monto: number; retencion: number; count: number }> = {};
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+
+  // Monthly payments aggregation with contract-level detail
+  const { monthlyPaymentsData, monthlyPaymentsDetail } = useMemo(() => {
+    const monthMap: Record<string, { month: string; monto: number }> = {};
+    const detailMap: Record<string, { contractId: string; description: string; company: string; monto: number }[]> = {};
     const MONTH_NAMES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
     const contractsToUse = selectedContractClasses.length > 0
@@ -180,26 +183,47 @@ export default function ExecutiveView() {
     contractsToUse.forEach(c => {
       c.paymentsList.forEach(p => {
         if (!p.fechaContabilizacion || p.fechaContabilizacion === '-') return;
-        // Parse DD/MM/YYYY
         const parts = p.fechaContabilizacion.split('/');
         if (parts.length !== 3) return;
         const monthIdx = parseInt(parts[1], 10) - 1;
         const year = parts[2];
         if (isNaN(monthIdx) || monthIdx < 0 || monthIdx > 11) return;
         const key = `${year}-${String(monthIdx + 1).padStart(2, '0')}`;
+        const label = `${MONTH_NAMES[monthIdx]} ${year}`;
         if (!monthMap[key]) {
-          monthMap[key] = { month: `${MONTH_NAMES[monthIdx]} ${year}`, monto: 0, retencion: 0, count: 0 };
+          monthMap[key] = { month: label, monto: 0 };
         }
         monthMap[key].monto += p.monto;
-        monthMap[key].retencion += p.retencion;
-        monthMap[key].count += 1;
+        if (!detailMap[key]) detailMap[key] = [];
+        detailMap[key].push({
+          contractId: c.contractId,
+          description: c.description || '-',
+          company: c.company || '-',
+          monto: p.monto,
+        });
       });
     });
 
-    return Object.entries(monthMap)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([, v]) => v);
+    const sorted = Object.entries(monthMap).sort(([a], [b]) => a.localeCompare(b));
+    return {
+      monthlyPaymentsData: sorted.map(([key, v]) => ({ ...v, key })),
+      monthlyPaymentsDetail: detailMap,
+    };
   }, [contracts, selectedContractClasses]);
+
+  // Aggregate detail by contract for selected month
+  const selectedMonthDetail = useMemo(() => {
+    if (!selectedMonth || !monthlyPaymentsDetail[selectedMonth]) return [];
+    const byContract: Record<string, { contractId: string; description: string; company: string; monto: number }> = {};
+    monthlyPaymentsDetail[selectedMonth].forEach(d => {
+      if (!byContract[d.contractId]) {
+        byContract[d.contractId] = { ...d };
+      } else {
+        byContract[d.contractId].monto += d.monto;
+      }
+    });
+    return Object.values(byContract).sort((a, b) => b.monto - a.monto);
+  }, [selectedMonth, monthlyPaymentsDetail]);
 
   const COLORS = ['hsl(221, 83%, 53%)', 'hsl(215, 25%, 27%)', 'hsl(200, 90%, 70%)', 'hsl(210, 20%, 90%)', '#F59E0B', '#10B981', '#6366F1', '#EC4899'];
 
@@ -531,15 +555,22 @@ export default function ExecutiveView() {
       {/* Monthly Payments Chart */}
       {monthlyPaymentsData.length > 0 && (
         <Card className="mb-8">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Banknote className="h-5 w-5 text-green-600" />
-              Pagos por Mes
-            </CardTitle>
-            <CardDescription>Distribución mensual de pagos realizados (Sin IGV)</CardDescription>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Banknote className="h-5 w-5 text-green-600" />
+                Pagos por Mes
+              </CardTitle>
+              <CardDescription>Selecciona una barra para ver el detalle de pagos del mes</CardDescription>
+            </div>
+            {selectedMonth && (
+              <Button size="sm" variant="secondary" onClick={() => setSelectedMonth(null)} className="h-6 text-xs gap-1">
+                <FilterX className="h-3 w-3" /> Limpiar
+              </Button>
+            )}
           </CardHeader>
           <CardContent>
-            <div className="h-[350px]">
+            <div className="h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={monthlyPaymentsData} margin={{ top: 10, right: 30, left: 20, bottom: 40 }}>
                   <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
@@ -556,23 +587,72 @@ export default function ExecutiveView() {
                   />
                   <Tooltip
                     contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-                    formatter={(value: any, name: string) => [
+                    formatter={(value: any) => [
                       Number(value).toLocaleString('en-US', { style: 'currency', currency: 'USD' }),
-                      name === 'monto' ? 'Pagado' : 'Retención'
+                      'Pagado'
                     ]}
                     labelFormatter={(label) => `Mes: ${label}`}
                   />
-                  <Legend formatter={(value) => value === 'monto' ? 'Pagado' : 'Retención'} />
-                  <Bar dataKey="monto" fill="hsl(142, 71%, 45%)" radius={[4, 4, 0, 0]} name="monto" />
-                  <Bar dataKey="retencion" fill="hsl(25, 95%, 53%)" radius={[4, 4, 0, 0]} name="retencion" />
+                  <Bar
+                    dataKey="monto"
+                    radius={[4, 4, 0, 0]}
+                    cursor="pointer"
+                    onClick={(data: any) => data && setSelectedMonth(data.key)}
+                  >
+                    {monthlyPaymentsData.map((entry) => (
+                      <Cell
+                        key={entry.key}
+                        fill={selectedMonth === entry.key ? 'hsl(221, 83%, 53%)' : 'hsl(142, 71%, 45%)'}
+                        strokeWidth={selectedMonth === entry.key ? 2 : 0}
+                        stroke="hsl(221, 83%, 40%)"
+                      />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>
-            <div className="flex justify-end mt-2">
-              <span className="text-xs text-muted-foreground">
-                Total: {monthlyPaymentsData.reduce((a, b) => a + b.count, 0)} pagos en {monthlyPaymentsData.length} meses
-              </span>
-            </div>
+
+            {/* Detail table for selected month */}
+            {selectedMonth && selectedMonthDetail.length > 0 && (
+              <div className="mt-4 animate-in fade-in slide-in-from-bottom-5 duration-300">
+                <h4 className="text-sm font-medium mb-2">
+                  Detalle: <span className="text-primary">{monthlyPaymentsData.find(m => m.key === selectedMonth)?.month}</span>
+                  <span className="text-muted-foreground ml-2 text-xs">({selectedMonthDetail.length} contratos)</span>
+                </h4>
+                <div className="max-h-[300px] overflow-auto border rounded-lg">
+                  <Table>
+                    <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
+                      <TableRow>
+                        <TableHead>Nro Contrato</TableHead>
+                        <TableHead>Descripción</TableHead>
+                        <TableHead>Proveedor</TableHead>
+                        <TableHead className="text-right">Monto Pagado</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {selectedMonthDetail.map((d) => (
+                        <TableRow key={d.contractId}>
+                          <TableCell className="font-mono text-xs font-bold">{d.contractId}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground max-w-[300px] truncate" title={d.description}>{d.description}</TableCell>
+                          <TableCell className="text-xs">{d.company}</TableCell>
+                          <TableCell className="text-right font-mono text-xs text-green-600">
+                            {d.monto.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                    <TableFooter className="bg-primary/5 font-bold">
+                      <TableRow>
+                        <TableCell colSpan={3}>Total</TableCell>
+                        <TableCell className="text-right font-mono text-green-700">
+                          {selectedMonthDetail.reduce((a, b) => a + b.monto, 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                        </TableCell>
+                      </TableRow>
+                    </TableFooter>
+                  </Table>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
