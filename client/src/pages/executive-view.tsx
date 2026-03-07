@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { useAppStore } from "@/store";
 import { Layout } from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip, Cell, PieChart, Pie, Legend } from "recharts";
+import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip, Cell, PieChart, Pie, Legend, CartesianGrid } from "recharts";
 import { DollarSign, FileText, Activity, TrendingUp, ShieldCheck, Lock, ChevronDown, FilterX, Calendar, Clock, AlertTriangle, FileCheck, ArrowRight, Check, Printer, Shield, Banknote, Tag, Building2, User } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Button } from "@/components/ui/button";
@@ -167,6 +167,39 @@ export default function ExecutiveView() {
     if (allEntries.length === 0) return [];
     return aggregateSpecializedData(allEntries);
   }, [filteredConsolidatedContracts]);
+
+  // Monthly payments aggregation
+  const monthlyPaymentsData = useMemo(() => {
+    const monthMap: Record<string, { month: string; monto: number; retencion: number; count: number }> = {};
+    const MONTH_NAMES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
+    const contractsToUse = selectedContractClasses.length > 0
+      ? contracts.filter(c => selectedContractClasses.includes(c.contractClass || ''))
+      : contracts;
+
+    contractsToUse.forEach(c => {
+      c.paymentsList.forEach(p => {
+        if (!p.fechaContabilizacion || p.fechaContabilizacion === '-') return;
+        // Parse DD/MM/YYYY
+        const parts = p.fechaContabilizacion.split('/');
+        if (parts.length !== 3) return;
+        const monthIdx = parseInt(parts[1], 10) - 1;
+        const year = parts[2];
+        if (isNaN(monthIdx) || monthIdx < 0 || monthIdx > 11) return;
+        const key = `${year}-${String(monthIdx + 1).padStart(2, '0')}`;
+        if (!monthMap[key]) {
+          monthMap[key] = { month: `${MONTH_NAMES[monthIdx]} ${year}`, monto: 0, retencion: 0, count: 0 };
+        }
+        monthMap[key].monto += p.monto;
+        monthMap[key].retencion += p.retencion;
+        monthMap[key].count += 1;
+      });
+    });
+
+    return Object.entries(monthMap)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([, v]) => v);
+  }, [contracts, selectedContractClasses]);
 
   const COLORS = ['hsl(221, 83%, 53%)', 'hsl(215, 25%, 27%)', 'hsl(200, 90%, 70%)', 'hsl(210, 20%, 90%)', '#F59E0B', '#10B981', '#6366F1', '#EC4899'];
 
@@ -494,6 +527,55 @@ export default function ExecutiveView() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Monthly Payments Chart */}
+      {monthlyPaymentsData.length > 0 && (
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Banknote className="h-5 w-5 text-green-600" />
+              Pagos por Mes
+            </CardTitle>
+            <CardDescription>Distribución mensual de pagos realizados (Sin IGV)</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-[350px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={monthlyPaymentsData} margin={{ top: 10, right: 30, left: 20, bottom: 40 }}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                  <XAxis
+                    dataKey="month"
+                    tick={{ fontSize: 11 }}
+                    angle={-45}
+                    textAnchor="end"
+                    height={60}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 11 }}
+                    tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+                  />
+                  <Tooltip
+                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                    formatter={(value: any, name: string) => [
+                      Number(value).toLocaleString('en-US', { style: 'currency', currency: 'USD' }),
+                      name === 'monto' ? 'Pagado' : 'Retención'
+                    ]}
+                    labelFormatter={(label) => `Mes: ${label}`}
+                  />
+                  <Legend formatter={(value) => value === 'monto' ? 'Pagado' : 'Retención'} />
+                  <Bar dataKey="monto" fill="hsl(142, 71%, 45%)" radius={[4, 4, 0, 0]} name="monto" />
+                  <Bar dataKey="retencion" fill="hsl(25, 95%, 53%)" radius={[4, 4, 0, 0]} name="retencion" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="flex justify-end mt-2">
+              <span className="text-xs text-muted-foreground">
+                Total: {monthlyPaymentsData.reduce((a, b) => a + b.count, 0)} pagos en {monthlyPaymentsData.length} meses
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Filtered Contracts Detail Section */}
       {selectedCategories.length > 0 && (
