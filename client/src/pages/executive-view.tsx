@@ -23,6 +23,7 @@ export default function ExecutiveView() {
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [selectedContractClasses, setSelectedContractClasses] = useState<string[]>([]);
   const [selectedContractId, setSelectedContractId] = useState<string | null>(null);
+  const [selectedStateFilter, setSelectedStateFilter] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Scroll to detail section when categories are selected
@@ -46,51 +47,98 @@ export default function ExecutiveView() {
     return consolidated.filter(c => c.items.some(i => selectedContractClasses.includes(i.contractClass || '')));
   }, [consolidated, selectedContractClasses]);
 
-  const totalInvestment = filteredByClassConsolidated.reduce((acc, c) => acc + c.totalAmount, 0);
-  const totalPaid = filteredByClassConsolidated.reduce((acc, c) => acc + c.totalPaid, 0);
-  // Suma de Retención (Pagos) + Garantías (Cartas Fianza)
-  const totalRetentionAndGuarantees = filteredByClassConsolidated.reduce((acc, c) => acc + c.totalRetention + c.totalGuarantees, 0);
-  
-  // Status Counts - desglose individual por estado
-  const contractsByStatus = useMemo(() => {
-    const statusMap: Record<string, number> = {};
+  // Helper: classify raw ESTADO into main category
+  // EJECUCION = solo "EJECUCION", CERRADOS = solo "CERRADO/CERRADOS", todo lo demás = FINIQUITO
+  const getMainStateCategory = (state: string): string => {
+    const s = state.toUpperCase().trim();
+    if (s === 'EJECUCION' || s === 'EN EJECUCION') return 'EJECUCION';
+    if (s === 'CERRADO' || s === 'CERRADOS') return 'CERRADOS';
+    return 'FINIQUITO';
+  };
+
+  // Status hierarchy for Estado Contratos KPI card
+  const statusHierarchy = useMemo(() => {
+    const mainCounts: Record<string, number> = { EJECUCION: 0, FINIQUITO: 0, CERRADOS: 0 };
+    const finiquitoSubs: Record<string, number> = {};
+
     filteredByClassConsolidated.forEach(c => {
-      const state = c.state?.trim() || 'Sin Estado';
-      statusMap[state] = (statusMap[state] || 0) + 1;
+      const raw = c.state?.trim() || 'Sin Estado';
+      const main = getMainStateCategory(raw);
+      mainCounts[main] = (mainCounts[main] || 0) + 1;
+      if (main === 'FINIQUITO') {
+        finiquitoSubs[raw] = (finiquitoSubs[raw] || 0) + 1;
+      }
     });
-    return Object.entries(statusMap).sort((a, b) => b[1] - a[1]);
+
+    return { mainCounts, finiquitoSubs };
   }, [filteredByClassConsolidated]);
+
+  // Apply state filter on top of class filter
+  const filteredByStateConsolidated = useMemo(() => {
+    if (!selectedStateFilter) return filteredByClassConsolidated;
+    return filteredByClassConsolidated.filter(c => {
+      const raw = c.state?.trim() || 'Sin Estado';
+      const main = getMainStateCategory(raw);
+      // If the filter is a main category, match all contracts in that category
+      if (selectedStateFilter === 'EJECUCION' || selectedStateFilter === 'CERRADOS') {
+        return main === selectedStateFilter;
+      }
+      // If the filter is a specific sub-state within FINIQUITO
+      if (main === 'FINIQUITO') {
+        // If user selected "FINIQUITO" (main), show all finiquito contracts
+        if (selectedStateFilter === 'FINIQUITO') return true;
+        // If user selected a specific sub-state, match exactly
+        return raw === selectedStateFilter;
+      }
+      return false;
+    });
+  }, [filteredByClassConsolidated, selectedStateFilter]);
+
+  const totalInvestment = filteredByStateConsolidated.reduce((acc, c) => acc + c.totalAmount, 0);
+  const totalPaid = filteredByStateConsolidated.reduce((acc, c) => acc + c.totalPaid, 0);
+  // Suma de Retención (Pagos) + Garantías (Cartas Fianza)
+  const totalRetentionAndGuarantees = filteredByStateConsolidated.reduce((acc, c) => acc + c.totalRetention + c.totalGuarantees, 0);
   
-  // Chart Data: Investment by Type vs Group (Filtered by Class)
+  // Build a set of contract IDs from the state-filtered consolidated list for filtering individual contracts
+  const stateFilteredContractIds = useMemo(() => {
+    if (!selectedStateFilter) return null;
+    const ids = new Set<string>();
+    filteredByStateConsolidated.forEach(c => ids.add(c.contractId));
+    return ids;
+  }, [filteredByStateConsolidated, selectedStateFilter]);
+
+  // Chart Data: Investment by Type vs Group (Filtered by Class + State)
   const investmentMap = useMemo(() => {
     return contracts.reduce((acc, c) => {
       // Filter by Class first
       if (selectedContractClasses.length > 0 && !selectedContractClasses.includes(c.contractClass || '')) return acc;
+      // Filter by State
+      if (stateFilteredContractIds && !stateFilteredContractIds.has(c.contractId)) return acc;
 
-      const key = viewMode === "type" 
-        ? (c.investmentType || 'Otros') 
+      const key = viewMode === "type"
+        ? (c.investmentType || 'Otros')
         : (c.investmentGroup || 'Sin Grupo');
       acc[key] = (acc[key] || 0) + c.amount;
       return acc;
     }, {} as Record<string, number>);
-  }, [contracts, viewMode, selectedContractClasses]);
+  }, [contracts, viewMode, selectedContractClasses, stateFilteredContractIds]);
   
   const investmentChartData = Object.entries(investmentMap).map(([name, value]) => ({ name, value }));
 
-  // Filtered Contracts Logic - Show CONSOLIDATED Contracts that match the category AND Class
+  // Filtered Contracts Logic - Show CONSOLIDATED Contracts that match the category AND Class AND State
   const filteredConsolidatedContracts = useMemo(() => {
     if (selectedCategories.length === 0) return [];
 
-    return filteredByClassConsolidated.filter(c => {
+    return filteredByStateConsolidated.filter(c => {
         // Check if any addendum in this contract matches ANY of the selected categories
         return c.items.some(item => {
-           const key = viewMode === "type" 
-            ? (item.investmentType || 'Otros') 
+           const key = viewMode === "type"
+            ? (item.investmentType || 'Otros')
             : (item.investmentGroup || 'Sin Grupo');
            return selectedCategories.includes(key);
         });
       });
-  }, [filteredByClassConsolidated, selectedCategories, viewMode]);
+  }, [filteredByStateConsolidated, selectedCategories, viewMode]);
 
   const selectedContractDetails = selectedContractId
     ? consolidated.find(c => c.contractId === selectedContractId)
@@ -106,20 +154,12 @@ export default function ExecutiveView() {
     return { total, amort, pending: total - amort };
   };
 
-  // Helper: classify raw ESTADO into main category
-  // EJECUCION = solo "EJECUCION", CERRADOS = solo "CERRADO/CERRADOS", todo lo demás = FINIQUITO
-  const getMainStateCategory = (state: string): string => {
-    const s = state.toUpperCase().trim();
-    if (s === 'EJECUCION' || s === 'EN EJECUCION') return 'EJECUCION';
-    if (s === 'CERRADO' || s === 'CERRADOS') return 'CERRADOS';
-    return 'FINIQUITO';
-  };
-
   // Chart Data: Contracts grouped by Estado (main category → sub-states with amounts)
+  // Uses filteredByStateConsolidated so chart reflects the state filter
   const { stateChartData, allSubStates } = useMemo(() => {
     const categoryMap: Record<string, Record<string, { count: number; amount: number }>> = {};
 
-    filteredByClassConsolidated.forEach(c => {
+    filteredByStateConsolidated.forEach(c => {
       const raw = c.state?.trim() || 'Sin Estado';
       const main = getMainStateCategory(raw);
       if (!categoryMap[main]) categoryMap[main] = {};
@@ -147,7 +187,7 @@ export default function ExecutiveView() {
       });
 
     return { stateChartData: data, allSubStates: Array.from(subStatesSet) };
-  }, [filteredByClassConsolidated]);
+  }, [filteredByStateConsolidated]);
 
   // Format aggregated field values for display
   const fmtField = (f: AggregatedField) => {
@@ -176,9 +216,12 @@ export default function ExecutiveView() {
     const detailMap: Record<string, { contractId: string; description: string; company: string; monto: number }[]> = {};
     const MONTH_NAMES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
-    const contractsToUse = selectedContractClasses.length > 0
+    let contractsToUse = selectedContractClasses.length > 0
       ? contracts.filter(c => selectedContractClasses.includes(c.contractClass || ''))
       : contracts;
+    if (stateFilteredContractIds) {
+      contractsToUse = contractsToUse.filter(c => stateFilteredContractIds.has(c.contractId));
+    }
 
     contractsToUse.forEach(c => {
       c.paymentsList.forEach(p => {
@@ -209,7 +252,7 @@ export default function ExecutiveView() {
       monthlyPaymentsData: sorted.map(([key, v]) => ({ ...v, key })),
       monthlyPaymentsDetail: detailMap,
     };
-  }, [contracts, selectedContractClasses]);
+  }, [contracts, selectedContractClasses, stateFilteredContractIds]);
 
   // Aggregate detail by contract for selected month
   const selectedMonthDetail = useMemo(() => {
@@ -402,17 +445,90 @@ export default function ExecutiveView() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Estado Contratos ({filteredByClassConsolidated.length})</CardTitle>
+            <CardTitle className="text-sm font-medium">
+              Estado Contratos ({filteredByClassConsolidated.length})
+              {selectedStateFilter && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-5 ml-2 text-[10px] px-1.5 text-muted-foreground hover:text-foreground"
+                  onClick={() => setSelectedStateFilter(null)}
+                >
+                  <FilterX className="h-3 w-3 mr-1" /> Limpiar
+                </Button>
+              )}
+            </CardTitle>
             <FileText className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className={`grid gap-1 text-center`} style={{ gridTemplateColumns: `repeat(${Math.min(contractsByStatus.length, 4)}, 1fr)` }}>
-              {contractsByStatus.map(([state, count]) => (
-                <div key={state}>
-                  <div className="text-lg font-bold">{count}</div>
-                  <div className="text-[10px] text-muted-foreground leading-tight">{state}</div>
+            <div className="space-y-2">
+              {/* 3 Main States */}
+              <div className="grid grid-cols-3 gap-1 text-center">
+                {(['EJECUCION', 'FINIQUITO', 'CERRADOS'] as const).map(mainState => {
+                  const count = statusHierarchy.mainCounts[mainState] || 0;
+                  const isActive = selectedStateFilter === mainState;
+                  const hasFiniquitoSub = mainState === 'FINIQUITO' && selectedStateFilter && selectedStateFilter !== 'EJECUCION' && selectedStateFilter !== 'CERRADOS' && selectedStateFilter !== 'FINIQUITO';
+                  return (
+                    <div
+                      key={mainState}
+                      onClick={() => setSelectedStateFilter(isActive ? null : mainState)}
+                      className={cn(
+                        "cursor-pointer rounded-md p-1.5 transition-all border",
+                        isActive || hasFiniquitoSub
+                          ? "bg-primary/10 border-primary shadow-sm"
+                          : "border-transparent hover:bg-muted"
+                      )}
+                    >
+                      <div className="text-lg font-bold">{count}</div>
+                      <div className="text-[10px] text-muted-foreground leading-tight">{mainState}</div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Finiquito Sub-states (shown when FINIQUITO has multiple sub-states) */}
+              {Object.keys(statusHierarchy.finiquitoSubs).length > 1 && (
+                <div className="border-t pt-1.5">
+                  <div className="text-[9px] text-muted-foreground uppercase tracking-wider mb-1 text-center">Sub-estados Finiquito</div>
+                  <div className="grid gap-0.5" style={{ gridTemplateColumns: `repeat(${Math.min(Object.keys(statusHierarchy.finiquitoSubs).length, 3)}, 1fr)` }}>
+                    {Object.entries(statusHierarchy.finiquitoSubs)
+                      .sort((a, b) => b[1] - a[1])
+                      .map(([sub, count]) => {
+                        const isSubActive = selectedStateFilter === sub;
+                        return (
+                          <div
+                            key={sub}
+                            onClick={() => setSelectedStateFilter(isSubActive ? null : sub)}
+                            className={cn(
+                              "cursor-pointer rounded p-1 text-center transition-all border",
+                              isSubActive
+                                ? "bg-yellow-100 border-yellow-400"
+                                : "border-transparent hover:bg-muted"
+                            )}
+                          >
+                            <div className="text-sm font-bold">{count}</div>
+                            <div className="text-[9px] text-muted-foreground leading-tight truncate" title={sub}>{sub}</div>
+                          </div>
+                        );
+                      })}
+                  </div>
                 </div>
-              ))}
+              )}
+
+              {/* If Finiquito has only one sub-state, show it inline */}
+              {Object.keys(statusHierarchy.finiquitoSubs).length === 1 && (() => {
+                const [sub] = Object.keys(statusHierarchy.finiquitoSubs);
+                const subUpper = sub.toUpperCase().trim();
+                // Only show if the single sub-state name differs from "FINIQUITO"
+                if (subUpper !== 'FINIQUITO') {
+                  return (
+                    <div className="border-t pt-1 text-center">
+                      <span className="text-[9px] text-muted-foreground">Finiquito: {sub}</span>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
             </div>
           </CardContent>
         </Card>
