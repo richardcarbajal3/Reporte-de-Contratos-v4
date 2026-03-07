@@ -33,14 +33,33 @@ export default function ExecutiveView() {
     }
   }, [selectedCategories]);
 
-  // Extract unique contract classes
+  // Extract unique contract classes (filtered by state if active)
   const availableContractClasses = useMemo(() => {
     const classes = new Set<string>();
-    contracts.forEach(c => {
-      if (c.contractClass) classes.add(c.contractClass);
+    const source = selectedStateFilter
+      ? consolidated.filter(c => {
+          const raw = c.state?.trim() || 'Sin Estado';
+          const main = getMainStateCategory(raw);
+          if (selectedStateFilter === 'EJECUCION' || selectedStateFilter === 'CERRADOS') return main === selectedStateFilter;
+          if (selectedStateFilter === 'FINIQUITO') return main === 'FINIQUITO';
+          return raw === selectedStateFilter;
+        })
+      : consolidated;
+    source.forEach(c => {
+      c.items.forEach(i => { if (i.contractClass) classes.add(i.contractClass); });
     });
     return Array.from(classes).sort();
-  }, [contracts]);
+  }, [consolidated, selectedStateFilter]);
+
+  // Auto-clear class selections that are no longer available when state filter changes
+  useEffect(() => {
+    if (selectedContractClasses.length > 0) {
+      const valid = selectedContractClasses.filter(cls => availableContractClasses.includes(cls));
+      if (valid.length !== selectedContractClasses.length) {
+        setSelectedContractClasses(valid);
+      }
+    }
+  }, [availableContractClasses]);
 
   const filteredByClassConsolidated = useMemo(() => {
     if (selectedContractClasses.length === 0) return consolidated;
@@ -747,7 +766,7 @@ export default function ExecutiveView() {
                     </TableHeader>
                     <TableBody>
                       {selectedMonthDetail.map((d) => (
-                        <TableRow key={d.contractId}>
+                        <TableRow key={d.contractId} className="cursor-pointer hover:bg-muted/50" onClick={() => setSelectedContractId(d.contractId)}>
                           <TableCell className="font-mono text-xs font-bold">{d.contractId}</TableCell>
                           <TableCell className="text-xs text-muted-foreground max-w-[300px] truncate" title={d.description}>{d.description}</TableCell>
                           <TableCell className="text-xs">{d.company}</TableCell>
