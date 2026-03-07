@@ -4,8 +4,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Download, Building2, User, Tag, Calendar, Shield, Banknote, FileText, ChevronDown, ChevronRight } from "lucide-react";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { aggregateSpecializedData, type AggregatedField } from "@/lib/specialized-sheets-config";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -23,9 +24,7 @@ const fmtField = (f: AggregatedField) => {
 function InvoiceDetail({ items }: { items: { key: string; addendumId: string; paymentsList: import("@/lib/excel-processor").PaymentRecord[] }[] }) {
   const [expanded, setExpanded] = useState(false);
   const allInvoices = items.flatMap(item =>
-    item.paymentsList
-      .filter(p => !p.isAdelanto)
-      .map(p => ({ ...p, adenda: item.addendumId }))
+    item.paymentsList.map(p => ({ ...p, adenda: item.addendumId }))
   );
 
   if (allInvoices.length === 0) return null;
@@ -39,7 +38,7 @@ function InvoiceDetail({ items }: { items: { key: string; addendumId: string; pa
         {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
         <FileText className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-xs font-medium text-muted-foreground">
-          Facturas ({allInvoices.length})
+          Facturas y Pagos ({allInvoices.length})
         </span>
       </button>
       {expanded && (
@@ -48,33 +47,46 @@ function InvoiceDetail({ items }: { items: { key: string; addendumId: string; pa
             <TableHeader>
               <TableRow className="bg-muted/20">
                 <TableHead className="text-xs">Adenda</TableHead>
+                <TableHead className="text-xs">Tipo</TableHead>
                 <TableHead className="text-xs">Valorizacion</TableHead>
                 <TableHead className="text-xs">Descripcion</TableHead>
                 <TableHead className="text-xs">Factura</TableHead>
                 <TableHead className="text-xs">Fecha Contabilizacion</TableHead>
                 <TableHead className="text-right text-xs">Monto (sin IGV)</TableHead>
                 <TableHead className="text-right text-xs">Retencion</TableHead>
+                <TableHead className="text-right text-xs">Amort. Adelanto</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {allInvoices.map((inv, idx) => (
-                <TableRow key={idx} className="hover:bg-muted/20 transition-colors">
+                <TableRow key={idx} className={`hover:bg-muted/20 transition-colors ${inv.isAdelanto ? 'bg-blue-50/50' : ''}`}>
                   <TableCell className="text-xs">{inv.adenda === '0' ? 'Contrato' : `Adenda ${inv.adenda}`}</TableCell>
+                  <TableCell className="text-xs">
+                    {inv.isAdelanto ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">Adelanto</span>
+                    ) : (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-medium">Pago</span>
+                    )}
+                  </TableCell>
                   <TableCell className="text-xs font-medium">{inv.valorizacion || '-'}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{inv.descripcion || '-'}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate" title={inv.descripcion}>{inv.descripcion || '-'}</TableCell>
                   <TableCell className="text-xs font-medium">{inv.factura || '-'}</TableCell>
                   <TableCell className="text-xs">{inv.fechaContabilizacion || '-'}</TableCell>
                   <TableCell className="text-right font-mono text-xs">{fmt(inv.monto)}</TableCell>
                   <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(inv.retencion)}</TableCell>
+                  <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(inv.amortizacionAdelanto)}</TableCell>
                 </TableRow>
               ))}
               <TableRow className="bg-muted/40 font-medium">
-                <TableCell className="text-xs font-bold" colSpan={5}>Total Facturas</TableCell>
+                <TableCell className="text-xs font-bold" colSpan={6}>Total</TableCell>
                 <TableCell className="text-right font-mono text-xs font-bold">
                   {fmt(allInvoices.reduce((s, i) => s + i.monto, 0))}
                 </TableCell>
                 <TableCell className="text-right font-mono text-xs font-bold">
                   {fmt(allInvoices.reduce((s, i) => s + i.retencion, 0))}
+                </TableCell>
+                <TableCell className="text-right font-mono text-xs font-bold">
+                  {fmt(allInvoices.reduce((s, i) => s + i.amortizacionAdelanto, 0))}
                 </TableCell>
               </TableRow>
             </TableBody>
@@ -85,9 +97,28 @@ function InvoiceDetail({ items }: { items: { key: string; addendumId: string; pa
   );
 }
 
+const STATE_STYLES: Record<string, string> = {
+  'Activo': 'bg-green-100 text-green-800 border-green-300',
+  'Cerrado': 'bg-gray-100 text-gray-600 border-gray-300',
+  'Liquidado': 'bg-blue-100 text-blue-700 border-blue-300',
+  'Suspendido': 'bg-orange-100 text-orange-700 border-orange-300',
+  'Resuelto': 'bg-red-100 text-red-700 border-red-300',
+};
+
 export default function DetailView() {
   const consolidated = useAppStore(s => s.consolidated);
   const contracts = useAppStore(s => s.contracts);
+  const [stateFilter, setStateFilter] = useState<string>('all');
+
+  const availableStates = useMemo(() => {
+    const states = new Set(consolidated.map(g => g.state));
+    return Array.from(states).sort();
+  }, [consolidated]);
+
+  const filteredConsolidated = useMemo(() => {
+    if (stateFilter === 'all') return consolidated;
+    return consolidated.filter(g => g.state === stateFilter);
+  }, [consolidated, stateFilter]);
 
   const handlePrint = () => {
     const doc = new jsPDF('l');
@@ -135,14 +166,39 @@ export default function DetailView() {
           <h2 className="text-3xl font-heading font-bold text-foreground">Detalle por Adenda</h2>
           <p className="text-muted-foreground mt-1">Desglose detallado de cada componente contractual</p>
         </div>
-        <Button onClick={handlePrint} variant="outline" className="gap-2">
-          <Download className="h-4 w-4" />
-          Exportar PDF
-        </Button>
+        <div className="flex items-center gap-3">
+          <Select value={stateFilter} onValueChange={setStateFilter}>
+            <SelectTrigger className="w-[180px] h-9 text-sm">
+              <SelectValue placeholder="Filtrar por estado" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos los estados</SelectItem>
+              {availableStates.map(s => (
+                <SelectItem key={s} value={s}>
+                  <span className="flex items-center gap-2">
+                    <span className={`inline-block w-2 h-2 rounded-full ${
+                      s === 'Activo' ? 'bg-green-500' :
+                      s === 'Cerrado' ? 'bg-gray-400' :
+                      s === 'Liquidado' ? 'bg-blue-500' :
+                      s === 'Suspendido' ? 'bg-orange-500' :
+                      s === 'Resuelto' ? 'bg-red-500' :
+                      'bg-yellow-500'
+                    }`} />
+                    {s}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button onClick={handlePrint} variant="outline" className="gap-2">
+            <Download className="h-4 w-4" />
+            Exportar PDF
+          </Button>
+        </div>
       </div>
 
       <div className="space-y-6">
-        {consolidated.map((group) => {
+        {filteredConsolidated.map((group) => {
           const parent = getParentInfo(group.items);
           const guarantees = getGroupGuarantees(group.items);
           const adelanto = getGroupAdelanto(group.items);
@@ -161,13 +217,14 @@ export default function DetailView() {
                     <CardTitle className="text-lg font-heading">
                       Contrato Padre: <span className="font-mono">{group.contractId}</span>
                     </CardTitle>
-                    <span className={`text-xs px-2 py-1 rounded-full font-medium ${
-                      group.state === 'Activo' ? 'bg-green-100 text-green-700' :
-                      group.state === 'Cerrado' ? 'bg-gray-100 text-gray-600' :
-                      'bg-yellow-100 text-yellow-700'
-                    }`}>
+                    <Badge
+                      variant="outline"
+                      className={`text-xs px-2.5 py-1 rounded-md font-semibold border ${
+                        STATE_STYLES[group.state] || 'bg-yellow-100 text-yellow-700 border-yellow-300'
+                      }`}
+                    >
                       {group.state}
-                    </span>
+                    </Badge>
                   </div>
 
                   {parent?.description && (
