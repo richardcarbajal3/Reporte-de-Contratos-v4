@@ -4,7 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Download, Building2, User, Tag, Calendar, Shield, Banknote } from "lucide-react";
+import { Download, Building2, User, Tag, Calendar, Shield, Banknote, FileText, ChevronDown, ChevronRight } from "lucide-react";
+import { useState } from "react";
 import { aggregateSpecializedData, type AggregatedField } from "@/lib/specialized-sheets-config";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -18,6 +19,71 @@ const fmtField = (f: AggregatedField) => {
   if (f.format === 'percent') return `${num.toFixed(f.decimals)}%`;
   return num.toLocaleString('es-PE', { minimumFractionDigits: f.decimals, maximumFractionDigits: f.decimals });
 };
+
+function InvoiceDetail({ items }: { items: { key: string; addendumId: string; paymentsList: import("@/lib/excel-processor").PaymentRecord[] }[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const allInvoices = items.flatMap(item =>
+    item.paymentsList
+      .filter(p => !p.isAdelanto)
+      .map(p => ({ ...p, adenda: item.addendumId }))
+  );
+
+  if (allInvoices.length === 0) return null;
+
+  return (
+    <div className="border-t">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 px-4 py-2 w-full text-left hover:bg-muted/30 transition-colors"
+      >
+        {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="text-xs font-medium text-muted-foreground">
+          Facturas ({allInvoices.length})
+        </span>
+      </button>
+      {expanded && (
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/20">
+                <TableHead className="text-xs">Adenda</TableHead>
+                <TableHead className="text-xs">Valorizacion</TableHead>
+                <TableHead className="text-xs">Descripcion</TableHead>
+                <TableHead className="text-xs">Factura</TableHead>
+                <TableHead className="text-xs">Fecha Contabilizacion</TableHead>
+                <TableHead className="text-right text-xs">Monto (sin IGV)</TableHead>
+                <TableHead className="text-right text-xs">Retencion</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {allInvoices.map((inv, idx) => (
+                <TableRow key={idx} className="hover:bg-muted/20 transition-colors">
+                  <TableCell className="text-xs">{inv.adenda === '0' ? 'Contrato' : `Adenda ${inv.adenda}`}</TableCell>
+                  <TableCell className="text-xs font-medium">{inv.valorizacion || '-'}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{inv.descripcion || '-'}</TableCell>
+                  <TableCell className="text-xs font-medium">{inv.factura || '-'}</TableCell>
+                  <TableCell className="text-xs">{inv.fechaContabilizacion || '-'}</TableCell>
+                  <TableCell className="text-right font-mono text-xs">{fmt(inv.monto)}</TableCell>
+                  <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(inv.retencion)}</TableCell>
+                </TableRow>
+              ))}
+              <TableRow className="bg-muted/40 font-medium">
+                <TableCell className="text-xs font-bold" colSpan={5}>Total Facturas</TableCell>
+                <TableCell className="text-right font-mono text-xs font-bold">
+                  {fmt(allInvoices.reduce((s, i) => s + i.monto, 0))}
+                </TableCell>
+                <TableCell className="text-right font-mono text-xs font-bold">
+                  {fmt(allInvoices.reduce((s, i) => s + i.retencion, 0))}
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function DetailView() {
   const consolidated = useAppStore(s => s.consolidated);
@@ -288,6 +354,9 @@ export default function DetailView() {
                     </TableBody>
                   </Table>
                 </div>
+
+                {/* Detalle de Facturas */}
+                <InvoiceDetail items={group.items} />
               </CardContent>
 
               {/* ============ BLOQUE 4: Datos Adicionales (E_ Sheets) ============ */}
