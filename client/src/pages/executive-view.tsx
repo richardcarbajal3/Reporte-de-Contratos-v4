@@ -14,7 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
-import { aggregateSpecializedData, type AggregatedSheetData, type AggregatedField } from "@/lib/specialized-sheets-config";
+import { aggregateSpecializedData, computeExecutiveKpis, type AggregatedSheetData, type AggregatedField, type ComputedKpi } from "@/lib/specialized-sheets-config";
 import type { SpecializedSheetEntry } from "@/lib/excel-processor";
 
 export default function ExecutiveView() {
@@ -131,7 +131,14 @@ export default function ExecutiveView() {
   const totalPaid = kpiSource.reduce((acc, c) => acc + c.totalPaid, 0);
   // Suma de Retención (Pagos) + Garantías (Cartas Fianza)
   const totalRetentionAndGuarantees = kpiSource.reduce((acc, c) => acc + c.totalRetention + c.totalGuarantees, 0);
-  
+
+  // Executive KPIs from specialized sheets (E_arrendamiento, E_obras, etc.)
+  const executiveKpis = useMemo((): ComputedKpi[] => {
+    const allEntries = kpiSource.flatMap(c => c.items.flatMap(i => i.specializedData));
+    if (allEntries.length === 0) return [];
+    return computeExecutiveKpis(allEntries);
+  }, [kpiSource]);
+
   // Build a set of contract IDs from the state-filtered consolidated list for filtering individual contracts
   const stateFilteredContractIds = useMemo(() => {
     if (!selectedStateFilter) return null;
@@ -292,19 +299,24 @@ export default function ExecutiveView() {
     };
   }, [contracts, selectedContractClasses, stateFilteredContractIds]);
 
-  // Aggregate detail by contract for selected month
+  // Aggregate detail by contract for selected month (enriched with cumulative progress)
   const selectedMonthDetail = useMemo(() => {
     if (!selectedMonth || !monthlyPaymentsDetail[selectedMonth]) return [];
-    const byContract: Record<string, { contractId: string; description: string; company: string; monto: number }> = {};
+    const byContract: Record<string, { contractId: string; description: string; company: string; monto: number; totalAmount: number; totalPaid: number }> = {};
     monthlyPaymentsDetail[selectedMonth].forEach(d => {
       if (!byContract[d.contractId]) {
-        byContract[d.contractId] = { ...d };
+        const cons = consolidated.find(c => c.contractId === d.contractId);
+        byContract[d.contractId] = {
+          ...d,
+          totalAmount: cons?.totalAmount ?? 0,
+          totalPaid: cons?.totalPaid ?? 0,
+        };
       } else {
         byContract[d.contractId].monto += d.monto;
       }
     });
     return Object.values(byContract).sort((a, b) => b.monto - a.monto);
-  }, [selectedMonth, monthlyPaymentsDetail]);
+  }, [selectedMonth, monthlyPaymentsDetail, consolidated]);
 
   const COLORS = ['hsl(221, 83%, 53%)', 'hsl(215, 25%, 27%)', 'hsl(200, 90%, 70%)', 'hsl(210, 20%, 90%)', '#F59E0B', '#10B981', '#6366F1', '#EC4899'];
 
@@ -344,10 +356,10 @@ export default function ExecutiveView() {
 
   return (
     <Layout>
-      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-8 gap-4 print:mb-4">
-        <div>
-          <h2 className="text-3xl font-heading font-bold text-foreground">Reporte Ejecutivo</h2>
-          <p className="text-muted-foreground mt-1 print:hidden">Visión estratégica y métricas clave de rendimiento</p>
+      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-4 gap-2 print:mb-2">
+        <div className="flex items-baseline gap-2">
+          <h2 className="text-xl font-heading font-bold text-foreground">Reporte Ejecutivo</h2>
+          <span className="text-xs text-muted-foreground print:hidden">Visión estratégica</span>
         </div>
         
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full xl:w-auto print:hidden">
@@ -446,7 +458,7 @@ export default function ExecutiveView() {
           <span className="text-muted-foreground">({kpiSource.length} contratos)</span>
         </div>
       )}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Inversión Total</CardTitle>
@@ -578,6 +590,26 @@ export default function ExecutiveView() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Executive KPIs from specialized sheets */}
+      {executiveKpis.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
+          {executiveKpis.map((kpi) => (
+            <Card key={kpi.label} className="border-dashed border-blue-200 bg-blue-50/20">
+              <CardContent className="p-3">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{kpi.label}</p>
+                <p className="text-lg font-bold font-mono mt-1">
+                  {kpi.format === 'currency'
+                    ? (kpi.value as number).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: kpi.decimals })
+                    : kpi.format === 'percent'
+                    ? `${(kpi.value as number).toFixed(kpi.decimals)}%`
+                    : (kpi.value as number).toLocaleString('es-PE', { minimumFractionDigits: kpi.decimals, maximumFractionDigits: kpi.decimals })}
+                </p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
 
       {/* Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
@@ -788,10 +820,13 @@ export default function ExecutiveView() {
                         <TableHead>Descripción</TableHead>
                         <TableHead>Proveedor</TableHead>
                         <TableHead className="text-right">Monto Pagado</TableHead>
+                        <TableHead className="text-center">% Acumulado</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {selectedMonthDetail.map((d) => (
+                      {selectedMonthDetail.map((d) => {
+                        const pctAcum = d.totalAmount > 0 ? (d.totalPaid / d.totalAmount) * 100 : 0;
+                        return (
                         <TableRow key={d.contractId} className="cursor-pointer hover:bg-muted/50" onClick={() => setSelectedContractId(d.contractId)}>
                           <TableCell className="font-mono text-xs font-bold">{d.contractId}</TableCell>
                           <TableCell className="text-xs text-muted-foreground max-w-[300px] truncate" title={d.description}>{d.description}</TableCell>
@@ -799,8 +834,20 @@ export default function ExecutiveView() {
                           <TableCell className="text-right font-mono text-xs text-green-600">
                             {d.monto.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
                           </TableCell>
+                          <TableCell className="text-center">
+                            <div className="flex items-center justify-center gap-2">
+                              <div className="w-16 h-2 bg-secondary rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-blue-500 transition-all duration-500"
+                                  style={{ width: `${Math.min(pctAcum, 100)}%` }}
+                                />
+                              </div>
+                              <span className="font-mono text-xs text-blue-600 font-medium">{pctAcum.toFixed(1)}%</span>
+                            </div>
+                          </TableCell>
                         </TableRow>
-                      ))}
+                        );
+                      })}
                     </TableBody>
                     <TableFooter className="bg-primary/5 font-bold">
                       <TableRow>
@@ -808,6 +855,7 @@ export default function ExecutiveView() {
                         <TableCell className="text-right font-mono text-green-700">
                           {selectedMonthDetail.reduce((a, b) => a + b.monto, 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
                         </TableCell>
+                        <TableCell></TableCell>
                       </TableRow>
                     </TableFooter>
                   </Table>
