@@ -67,12 +67,12 @@ export default function ExecutiveView() {
     return consolidated.filter(c => c.items.some(i => selectedContractClasses.includes(i.contractClass || '')));
   }, [consolidated, selectedContractClasses]);
 
-  // Helper: classify raw ESTADO into main category
-  // EJECUCION = solo "EJECUCION", CERRADOS = solo "CERRADO/CERRADOS", todo lo demás = FINIQUITO
+  // Helper: classify raw ESTADO into main category using substring matching
+  // Handles prefixed states like "3 CERRADO (i)", "2.0 EJECUCION", etc.
   const getMainStateCategory = (state: string): string => {
     const s = state.toUpperCase().trim();
-    if (s === 'EJECUCION' || s === 'EN EJECUCION') return 'EJECUCION';
-    if (s === 'CERRADO' || s === 'CERRADOS') return 'CERRADOS';
+    if (s.includes('CERRADO')) return 'CERRADOS';
+    if (s.includes('EJECUCION')) return 'EJECUCION';
     return 'FINIQUITO';
   };
 
@@ -136,8 +136,14 @@ export default function ExecutiveView() {
   const executiveKpis = useMemo((): ComputedKpi[] => {
     const allEntries = kpiSource.flatMap(c => c.items.flatMap(i => i.specializedData));
     if (allEntries.length === 0) return [];
-    return computeExecutiveKpis(allEntries);
+    const result = computeExecutiveKpis(allEntries);
+    return result;
   }, [kpiSource]);
+
+  // Check if any contract has specialized data (for showing info message)
+  const hasAnySpecializedData = useMemo(() => {
+    return consolidated.some(c => c.items.some(i => i.specializedData.length > 0));
+  }, [consolidated]);
 
   // Build a set of contract IDs from the state-filtered consolidated list for filtering individual contracts
   const stateFilteredContractIds = useMemo(() => {
@@ -362,7 +368,7 @@ export default function ExecutiveView() {
           <span className="text-xs text-muted-foreground print:hidden">Visión estratégica</span>
         </div>
         
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full xl:w-auto print:hidden">
+        <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto print:hidden">
           {/* Export to PDF Button */}
           <Button 
             variant="outline" 
@@ -503,7 +509,7 @@ export default function ExecutiveView() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">
-              Estado Contratos ({filteredByClassConsolidated.length})
+              Estado ({filteredByClassConsolidated.length})
               {selectedStateFilter && (
                 <Button
                   variant="ghost"
@@ -518,81 +524,33 @@ export default function ExecutiveView() {
             <FileText className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="space-y-2">
-              {/* 3 Main States */}
-              <div className="grid grid-cols-3 gap-1 text-center">
-                {(['EJECUCION', 'FINIQUITO', 'CERRADOS'] as const).map(mainState => {
-                  const count = statusHierarchy.mainCounts[mainState] || 0;
-                  const isActive = selectedStateFilter === mainState;
-                  const hasFiniquitoSub = mainState === 'FINIQUITO' && selectedStateFilter && selectedStateFilter !== 'EJECUCION' && selectedStateFilter !== 'CERRADOS' && selectedStateFilter !== 'FINIQUITO';
-                  return (
-                    <div
-                      key={mainState}
-                      onClick={() => setSelectedStateFilter(isActive ? null : mainState)}
-                      className={cn(
-                        "cursor-pointer rounded-md p-1.5 transition-all border",
-                        isActive || hasFiniquitoSub
-                          ? "bg-primary/10 border-primary shadow-sm"
-                          : "border-transparent hover:bg-muted"
-                      )}
-                    >
-                      <div className="text-lg font-bold">{count}</div>
-                      <div className="text-[10px] text-muted-foreground leading-tight">{mainState}</div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Finiquito Sub-states (shown when FINIQUITO has multiple sub-states) */}
-              {Object.keys(statusHierarchy.finiquitoSubs).length > 1 && (
-                <div className="border-t pt-1.5">
-                  <div className="text-[9px] text-muted-foreground uppercase tracking-wider mb-1 text-center">Sub-estados Finiquito</div>
-                  <div className="grid gap-0.5" style={{ gridTemplateColumns: `repeat(${Math.min(Object.keys(statusHierarchy.finiquitoSubs).length, 3)}, 1fr)` }}>
-                    {Object.entries(statusHierarchy.finiquitoSubs)
-                      .sort((a, b) => b[1] - a[1])
-                      .map(([sub, count]) => {
-                        const isSubActive = selectedStateFilter === sub;
-                        return (
-                          <div
-                            key={sub}
-                            onClick={() => setSelectedStateFilter(isSubActive ? null : sub)}
-                            className={cn(
-                              "cursor-pointer rounded p-1 text-center transition-all border",
-                              isSubActive
-                                ? "bg-yellow-100 border-yellow-400"
-                                : "border-transparent hover:bg-muted"
-                            )}
-                          >
-                            <div className="text-sm font-bold">{count}</div>
-                            <div className="text-[9px] text-muted-foreground leading-tight truncate" title={sub}>{sub}</div>
-                          </div>
-                        );
-                      })}
+            <div className="grid grid-cols-3 gap-1 text-center">
+              {(['EJECUCION', 'FINIQUITO', 'CERRADOS'] as const).map(mainState => {
+                const count = statusHierarchy.mainCounts[mainState] || 0;
+                const isActive = selectedStateFilter === mainState;
+                return (
+                  <div
+                    key={mainState}
+                    onClick={() => setSelectedStateFilter(isActive ? null : mainState)}
+                    className={cn(
+                      "cursor-pointer rounded-md p-2 transition-all border",
+                      isActive
+                        ? "bg-primary/10 border-primary shadow-sm"
+                        : "border-transparent hover:bg-muted"
+                    )}
+                  >
+                    <div className="text-2xl font-bold">{count}</div>
+                    <div className="text-[10px] text-muted-foreground leading-tight">{mainState}</div>
                   </div>
-                </div>
-              )}
-
-              {/* If Finiquito has only one sub-state, show it inline */}
-              {Object.keys(statusHierarchy.finiquitoSubs).length === 1 && (() => {
-                const [sub] = Object.keys(statusHierarchy.finiquitoSubs);
-                const subUpper = sub.toUpperCase().trim();
-                // Only show if the single sub-state name differs from "FINIQUITO"
-                if (subUpper !== 'FINIQUITO') {
-                  return (
-                    <div className="border-t pt-1 text-center">
-                      <span className="text-[9px] text-muted-foreground">Finiquito: {sub}</span>
-                    </div>
-                  );
-                }
-                return null;
-              })()}
+                );
+              })}
             </div>
           </CardContent>
         </Card>
       </div>
 
       {/* Executive KPIs from specialized sheets */}
-      {executiveKpis.length > 0 && (
+      {executiveKpis.length > 0 ? (
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
           {executiveKpis.map((kpi) => (
             <Card key={kpi.label} className="border-dashed border-blue-200 bg-blue-50/20">
@@ -609,7 +567,12 @@ export default function ExecutiveView() {
             </Card>
           ))}
         </div>
-      )}
+      ) : !hasAnySpecializedData && contracts.length > 0 ? (
+        <div className="mb-6 p-3 border border-dashed border-muted-foreground/30 rounded-lg text-xs text-muted-foreground text-center">
+          KPIs adicionales disponibles si el Excel incluye hojas <span className="font-mono font-medium">E_arrendamiento</span>, <span className="font-mono font-medium">E_obras</span>, etc.
+          Configurar en <span className="font-mono">specialized-sheets-config.ts</span>
+        </div>
+      ) : null}
 
       {/* Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
