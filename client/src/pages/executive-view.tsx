@@ -227,6 +227,16 @@ export default function ExecutiveView() {
     return aggregateSpecializedData(allEntries);
   }, [filteredConsolidatedContracts]);
 
+  // Compute aggregated specialized data for ALL currently visible contracts (class + state filters)
+  const generalSpecializedAggregation = useMemo((): AggregatedSheetData[] => {
+    if (filteredByStateConsolidated.length === 0) return [];
+    const allEntries: SpecializedSheetEntry[] = filteredByStateConsolidated.flatMap(c =>
+      c.items.flatMap(i => i.specializedData)
+    );
+    if (allEntries.length === 0) return [];
+    return aggregateSpecializedData(allEntries);
+  }, [filteredByStateConsolidated]);
+
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
 
   // Monthly payments aggregation with contract-level detail
@@ -552,6 +562,40 @@ export default function ExecutiveView() {
           </CardContent>
         </Card>
       </div>
+
+      {/* General Data Summary from Specialized Sheets (E_arrendamiento, E_obras, etc.) */}
+      {generalSpecializedAggregation.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+          {generalSpecializedAggregation.map((sheet) => (
+            <Card key={sheet.sheetType} className="border-blue-200 bg-gradient-to-br from-blue-50/50 to-background">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Activity className="h-4 w-4 text-blue-600" />
+                  {sheet.label}
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Datos generales agregados
+                  {(selectedContractClasses.length > 0 || selectedStateFilter) && (
+                    <span className="text-primary font-medium ml-1">
+                      (filtro activo: {filteredByStateConsolidated.length} contratos)
+                    </span>
+                  )}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                  {sheet.fields.map((f) => (
+                    <div key={f.label} className="text-center p-2.5 rounded-lg bg-background border shadow-sm">
+                      <div className="text-[10px] text-muted-foreground uppercase tracking-wide leading-tight">{f.label}</div>
+                      <div className="text-sm font-mono font-bold mt-1 text-blue-700">{fmtField(f)}</div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
 
       {/* Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
@@ -1171,6 +1215,58 @@ export default function ExecutiveView() {
                     </Table>
                   </div>
                 </div>
+
+                {/* ============ BLOQUE 3B: Detalle de Facturas ============ */}
+                {(() => {
+                  const allInvoices = selectedContractDetails.items.flatMap(item =>
+                    item.paymentsList.map(p => ({ ...p, adenda: item.addendumId }))
+                  );
+                  if (allInvoices.length === 0) return null;
+                  return (
+                    <div className="border-t">
+                      <div className="px-4 py-2 bg-muted/20">
+                        <h4 className="text-sm font-medium text-foreground">Detalle de Facturas ({allInvoices.length})</h4>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="bg-muted/40">
+                              <TableHead className="text-xs">Adenda</TableHead>
+                              <TableHead className="text-xs">Valorizacion</TableHead>
+                              <TableHead className="text-xs">Descripcion</TableHead>
+                              <TableHead className="text-xs">Factura</TableHead>
+                              <TableHead className="text-xs">Fecha Contabilizacion</TableHead>
+                              <TableHead className="text-right text-xs">Monto (sin IGV)</TableHead>
+                              <TableHead className="text-right text-xs">Retencion</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {allInvoices.map((inv, idx) => (
+                              <TableRow key={idx} className="hover:bg-muted/30 transition-colors">
+                                <TableCell className="text-xs">{inv.adenda === '0' ? 'Contrato' : `Adenda ${inv.adenda}`}</TableCell>
+                                <TableCell className="text-xs font-medium">{inv.valorizacion || '-'}</TableCell>
+                                <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate" title={inv.descripcion}>{inv.descripcion || '-'}</TableCell>
+                                <TableCell className="text-xs font-medium">{inv.factura || '-'}</TableCell>
+                                <TableCell className="text-xs">{inv.fechaContabilizacion || '-'}</TableCell>
+                                <TableCell className="text-right font-mono text-xs">{fmt(inv.monto)}</TableCell>
+                                <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(inv.retencion)}</TableCell>
+                              </TableRow>
+                            ))}
+                            <TableRow className="bg-muted/50 font-medium">
+                              <TableCell className="text-xs font-bold" colSpan={5}>Total Facturas</TableCell>
+                              <TableCell className="text-right font-mono text-xs font-bold">
+                                {fmt(allInvoices.reduce((s, i) => s + i.monto, 0))}
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-xs font-bold">
+                                {fmt(allInvoices.reduce((s, i) => s + i.retencion, 0))}
+                              </TableCell>
+                            </TableRow>
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* ============ BLOQUE 4: Datos Adicionales (E_ Sheets) ============ */}
                 {contractSpecialized.length > 0 && (
