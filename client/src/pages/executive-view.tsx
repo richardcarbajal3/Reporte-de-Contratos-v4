@@ -3,8 +3,9 @@ import { useAppStore } from "@/store";
 import { Layout } from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip, Cell, PieChart, Pie, Legend, CartesianGrid } from "recharts";
-import { DollarSign, FileText, Activity, TrendingUp, ShieldCheck, Lock, ChevronDown, FilterX, Calendar, Clock, AlertTriangle, FileCheck, ArrowRight, Check, Printer, Shield, Banknote, Tag, Building2, User } from "lucide-react";
+import { DollarSign, FileText, Activity, TrendingUp, ShieldCheck, Lock, ChevronDown, ChevronRight, FilterX, Calendar, Clock, AlertTriangle, FileCheck, ArrowRight, Check, Printer, Shield, Banknote, Tag, Building2, User, PanelLeftClose, PanelLeft } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -113,10 +114,23 @@ export default function ExecutiveView() {
     });
   }, [filteredByClassConsolidated, selectedStateFilter]);
 
-  const totalInvestment = filteredByStateConsolidated.reduce((acc, c) => acc + c.totalAmount, 0);
-  const totalPaid = filteredByStateConsolidated.reduce((acc, c) => acc + c.totalPaid, 0);
+  // KPI source: use category-filtered contracts if categories are selected, otherwise use state-filtered
+  const kpiSource = useMemo(() => {
+    if (selectedCategories.length === 0) return filteredByStateConsolidated;
+    return filteredByStateConsolidated.filter(c =>
+      c.items.some(item => {
+        const key = viewMode === "type"
+          ? (item.investmentType || 'Otros')
+          : (item.investmentGroup || 'Sin Grupo');
+        return selectedCategories.includes(key);
+      })
+    );
+  }, [filteredByStateConsolidated, selectedCategories, viewMode]);
+
+  const totalInvestment = kpiSource.reduce((acc, c) => acc + c.totalAmount, 0);
+  const totalPaid = kpiSource.reduce((acc, c) => acc + c.totalPaid, 0);
   // Suma de Retención (Pagos) + Garantías (Cartas Fianza)
-  const totalRetentionAndGuarantees = filteredByStateConsolidated.reduce((acc, c) => acc + c.totalRetention + c.totalGuarantees, 0);
+  const totalRetentionAndGuarantees = kpiSource.reduce((acc, c) => acc + c.totalRetention + c.totalGuarantees, 0);
   
   // Build a set of contract IDs from the state-filtered consolidated list for filtering individual contracts
   const stateFilteredContractIds = useMemo(() => {
@@ -227,15 +241,10 @@ export default function ExecutiveView() {
     return aggregateSpecializedData(allEntries);
   }, [filteredConsolidatedContracts]);
 
-  // Compute aggregated specialized data for ALL currently visible contracts (class + state filters)
-  const generalSpecializedAggregation = useMemo((): AggregatedSheetData[] => {
-    if (filteredByStateConsolidated.length === 0) return [];
-    const allEntries: SpecializedSheetEntry[] = filteredByStateConsolidated.flatMap(c =>
-      c.items.flatMap(i => i.specializedData)
-    );
-    if (allEntries.length === 0) return [];
-    return aggregateSpecializedData(allEntries);
-  }, [filteredByStateConsolidated]);
+  // Collapsible state for dialog blocks
+  const [collapsedBlocks, setCollapsedBlocks] = useState<Record<string, boolean>>({});
+  const toggleBlock = (blockId: string) => setCollapsedBlocks(prev => ({ ...prev, [blockId]: !prev[blockId] }));
+  const isBlockOpen = (blockId: string) => !collapsedBlocks[blockId]; // open by default
 
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
 
@@ -430,6 +439,13 @@ export default function ExecutiveView() {
       </div>
 
       {/* KPI Cards */}
+      {selectedCategories.length > 0 && (
+        <div className="mb-2 flex items-center gap-2 text-xs text-primary font-medium">
+          <Activity className="h-3.5 w-3.5" />
+          Mostrando datos de: {selectedCategories.length > 3 ? `${selectedCategories.length} categorías` : selectedCategories.join(', ')}
+          <span className="text-muted-foreground">({kpiSource.length} contratos)</span>
+        </div>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -562,40 +578,6 @@ export default function ExecutiveView() {
           </CardContent>
         </Card>
       </div>
-
-      {/* General Data Summary from Specialized Sheets (E_arrendamiento, E_obras, etc.) */}
-      {generalSpecializedAggregation.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-          {generalSpecializedAggregation.map((sheet) => (
-            <Card key={sheet.sheetType} className="border-blue-200 bg-gradient-to-br from-blue-50/50 to-background">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <Activity className="h-4 w-4 text-blue-600" />
-                  {sheet.label}
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Datos generales agregados
-                  {(selectedContractClasses.length > 0 || selectedStateFilter) && (
-                    <span className="text-primary font-medium ml-1">
-                      (filtro activo: {filteredByStateConsolidated.length} contratos)
-                    </span>
-                  )}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                  {sheet.fields.map((f) => (
-                    <div key={f.label} className="text-center p-2.5 rounded-lg bg-background border shadow-sm">
-                      <div className="text-[10px] text-muted-foreground uppercase tracking-wide leading-tight">{f.label}</div>
-                      <div className="text-sm font-mono font-bold mt-1 text-blue-700">{fmtField(f)}</div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
 
       {/* Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
@@ -1096,200 +1078,221 @@ export default function ExecutiveView() {
                   </div>
                 </div>
 
-                {/* ============ BLOQUE 2: Detalle Contractual ============ */}
-                <div className="border-b">
-                  <div className="px-4 py-2 bg-muted/20">
-                    <h4 className="text-sm font-medium text-foreground">Detalle Contractual</h4>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="bg-muted/40">
-                          <TableHead className="w-[120px]">Contrato / Adenda</TableHead>
-                          <TableHead className="min-w-[180px]">Descripcion</TableHead>
-                          <TableHead className="text-center">Inicio Plazo</TableHead>
-                          <TableHead className="text-center">Plazo</TableHead>
-                          <TableHead className="text-center">Fin</TableHead>
-                          <TableHead className="text-center">Ampliacion Plazo</TableHead>
-                          <TableHead className="text-right">Monto</TableHead>
-                          <TableHead className="text-right">Deductivo</TableHead>
-                          <TableHead className="text-right">Monto Neto</TableHead>
-                          <TableHead className="min-w-[150px]">Observaciones</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {selectedContractDetails.items.map((row) => (
-                          <TableRow key={row.key} className="hover:bg-muted/30 transition-colors">
-                            <TableCell className="text-xs font-medium">
-                              {row.addendumId === '0' ? 'Contrato' : `Adenda ${row.addendumId}`}
-                            </TableCell>
-                            <TableCell className="text-xs">{row.description || '-'}</TableCell>
-                            <TableCell className="text-xs text-center">{row.startDate || '-'}</TableCell>
-                            <TableCell className="text-xs text-center">{row.executionTerm || '-'}</TableCell>
-                            <TableCell className="text-xs text-center">{row.endDate || '-'}</TableCell>
-                            <TableCell className="text-xs text-center">{row.extensionTerm && row.extensionTerm !== '-' ? row.extensionTerm : '-'}</TableCell>
-                            <TableCell className="text-right font-mono text-xs">{fmt(row.amount)}</TableCell>
-                            <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                              {row.deductivo ? fmt(row.deductivo) : '-'}
-                            </TableCell>
-                            <TableCell className="text-right font-mono text-xs font-medium">{fmt(row.amountNet)}</TableCell>
-                            <TableCell className="text-xs text-muted-foreground max-w-[200px]" title={row.observaciones}>
-                              {row.observaciones || '-'}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                        <TableRow className="bg-muted/50 font-medium">
-                          <TableCell className="text-xs font-bold" colSpan={2}>Subtotal</TableCell>
-                          <TableCell className="text-xs text-center">{subtotalInicio}</TableCell>
-                          <TableCell></TableCell>
-                          <TableCell className="text-xs text-center">{subtotalFin}</TableCell>
-                          <TableCell></TableCell>
-                          <TableCell className="text-right font-mono text-xs font-bold">{fmt(subtotalMonto)}</TableCell>
-                          <TableCell className="text-right font-mono text-xs font-bold">
-                            {fmt(selectedContractDetails.items.reduce((s, i) => s + i.deductivo, 0))}
-                          </TableCell>
-                          <TableCell className="text-right font-mono text-xs font-bold">
-                            {fmt(selectedContractDetails.items.reduce((s, i) => s + i.amountNet, 0))}
-                          </TableCell>
-                          <TableCell></TableCell>
-                        </TableRow>
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
-
-                {/* ============ BLOQUE 3: Detalle de Pagos ============ */}
-                <div>
-                  <div className="px-4 py-2 bg-muted/20">
-                    <h4 className="text-sm font-medium text-foreground">Detalle de Pagos y Financiero</h4>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="bg-muted/40">
-                          <TableHead className="w-[120px]">Contrato / Adenda</TableHead>
-                          <TableHead className="text-right text-green-600">Pagos</TableHead>
-                          <TableHead className="text-right">Provisiones</TableHead>
-                          <TableHead className="text-right">O. Servicio</TableHead>
-                          <TableHead className="text-right">O. Cambio</TableHead>
-                          <TableHead className="text-right">Garantias</TableHead>
-                          <TableHead className="text-right font-bold text-primary">Saldo x Pagar</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {selectedContractDetails.items.map((row) => (
-                          <TableRow key={row.key} className="hover:bg-muted/30 transition-colors">
-                            <TableCell className="text-xs font-medium">
-                              {row.addendumId === '0' ? 'Contrato' : `Adenda ${row.addendumId}`}
-                            </TableCell>
-                            <TableCell className="text-right font-mono text-xs text-green-700/80 font-medium">{fmt(row.payments)}</TableCell>
-                            <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(row.provisions)}</TableCell>
-                            <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(row.serviceOrders)}</TableCell>
-                            <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(row.changeOrders)}</TableCell>
-                            <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(row.guarantees)}</TableCell>
-                            <TableCell className="text-right font-mono text-xs font-bold">{fmt(row.saldoPorPagar)}</TableCell>
-                          </TableRow>
-                        ))}
-                        <TableRow className="bg-muted/50 font-medium">
-                          <TableCell className="text-xs font-bold">Subtotal</TableCell>
-                          <TableCell className="text-right font-mono text-xs font-bold text-green-700/80">
-                            {fmt(selectedContractDetails.items.reduce((s, i) => s + i.payments, 0))}
-                          </TableCell>
-                          <TableCell className="text-right font-mono text-xs font-bold">
-                            {fmt(selectedContractDetails.items.reduce((s, i) => s + i.provisions, 0))}
-                          </TableCell>
-                          <TableCell className="text-right font-mono text-xs font-bold">
-                            {fmt(selectedContractDetails.items.reduce((s, i) => s + i.serviceOrders, 0))}
-                          </TableCell>
-                          <TableCell className="text-right font-mono text-xs font-bold">
-                            {fmt(selectedContractDetails.items.reduce((s, i) => s + i.changeOrders, 0))}
-                          </TableCell>
-                          <TableCell className="text-right font-mono text-xs font-bold">
-                            {fmt(selectedContractDetails.items.reduce((s, i) => s + i.guarantees, 0))}
-                          </TableCell>
-                          <TableCell className="text-right font-mono text-xs font-bold">
-                            {fmt(selectedContractDetails.items.reduce((s, i) => s + i.saldoPorPagar, 0))}
-                          </TableCell>
-                        </TableRow>
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
-
-                {/* ============ BLOQUE 3B: Detalle de Facturas ============ */}
-                {(() => {
-                  const allInvoices = selectedContractDetails.items.flatMap(item =>
-                    item.paymentsList.map(p => ({ ...p, adenda: item.addendumId }))
-                  );
-                  if (allInvoices.length === 0) return null;
-                  return (
-                    <div className="border-t">
-                      <div className="px-4 py-2 bg-muted/20">
-                        <h4 className="text-sm font-medium text-foreground">Detalle de Facturas ({allInvoices.length})</h4>
-                      </div>
+                {/* ============ BLOQUE 2: Detalle Contractual (Collapsible) ============ */}
+                <Collapsible open={isBlockOpen('contractual')} onOpenChange={() => toggleBlock('contractual')}>
+                  <div className="border-b">
+                    <CollapsibleTrigger asChild>
+                      <button className="w-full px-4 py-2 bg-muted/20 flex items-center gap-2 hover:bg-muted/40 transition-colors cursor-pointer">
+                        {isBlockOpen('contractual') ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                        <h4 className="text-sm font-medium text-foreground">Detalle Contractual</h4>
+                      </button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
                       <div className="overflow-x-auto">
                         <Table>
                           <TableHeader>
                             <TableRow className="bg-muted/40">
-                              <TableHead className="text-xs">Adenda</TableHead>
-                              <TableHead className="text-xs">Valorizacion</TableHead>
-                              <TableHead className="text-xs">Descripcion</TableHead>
-                              <TableHead className="text-xs">Factura</TableHead>
-                              <TableHead className="text-xs">Fecha Contabilizacion</TableHead>
-                              <TableHead className="text-right text-xs">Monto (sin IGV)</TableHead>
-                              <TableHead className="text-right text-xs">Retencion</TableHead>
+                              <TableHead className="w-[120px]">Contrato / Adenda</TableHead>
+                              <TableHead className="min-w-[180px]">Descripcion</TableHead>
+                              <TableHead className="text-center">Inicio Plazo</TableHead>
+                              <TableHead className="text-center">Plazo</TableHead>
+                              <TableHead className="text-center">Fin</TableHead>
+                              <TableHead className="text-center">Ampliacion Plazo</TableHead>
+                              <TableHead className="text-right">Monto</TableHead>
+                              <TableHead className="text-right">Deductivo</TableHead>
+                              <TableHead className="text-right">Monto Neto</TableHead>
+                              <TableHead className="min-w-[150px]">Observaciones</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {allInvoices.map((inv, idx) => (
-                              <TableRow key={idx} className="hover:bg-muted/30 transition-colors">
-                                <TableCell className="text-xs">{inv.adenda === '0' ? 'Contrato' : `Adenda ${inv.adenda}`}</TableCell>
-                                <TableCell className="text-xs font-medium">{inv.valorizacion || '-'}</TableCell>
-                                <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate" title={inv.descripcion}>{inv.descripcion || '-'}</TableCell>
-                                <TableCell className="text-xs font-medium">{inv.factura || '-'}</TableCell>
-                                <TableCell className="text-xs">{inv.fechaContabilizacion || '-'}</TableCell>
-                                <TableCell className="text-right font-mono text-xs">{fmt(inv.monto)}</TableCell>
-                                <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(inv.retencion)}</TableCell>
+                            {selectedContractDetails.items.map((row) => (
+                              <TableRow key={row.key} className="hover:bg-muted/30 transition-colors">
+                                <TableCell className="text-xs font-medium">
+                                  {row.addendumId === '0' ? 'Contrato' : `Adenda ${row.addendumId}`}
+                                </TableCell>
+                                <TableCell className="text-xs">{row.description || '-'}</TableCell>
+                                <TableCell className="text-xs text-center">{row.startDate || '-'}</TableCell>
+                                <TableCell className="text-xs text-center">{row.executionTerm || '-'}</TableCell>
+                                <TableCell className="text-xs text-center">{row.endDate || '-'}</TableCell>
+                                <TableCell className="text-xs text-center">{row.extensionTerm && row.extensionTerm !== '-' ? row.extensionTerm : '-'}</TableCell>
+                                <TableCell className="text-right font-mono text-xs">{fmt(row.amount)}</TableCell>
+                                <TableCell className="text-right font-mono text-xs text-muted-foreground">
+                                  {row.deductivo ? fmt(row.deductivo) : '-'}
+                                </TableCell>
+                                <TableCell className="text-right font-mono text-xs font-medium">{fmt(row.amountNet)}</TableCell>
+                                <TableCell className="text-xs text-muted-foreground max-w-[200px]" title={row.observaciones}>
+                                  {row.observaciones || '-'}
+                                </TableCell>
                               </TableRow>
                             ))}
                             <TableRow className="bg-muted/50 font-medium">
-                              <TableCell className="text-xs font-bold" colSpan={5}>Total Facturas</TableCell>
+                              <TableCell className="text-xs font-bold" colSpan={2}>Subtotal</TableCell>
+                              <TableCell className="text-xs text-center">{subtotalInicio}</TableCell>
+                              <TableCell></TableCell>
+                              <TableCell className="text-xs text-center">{subtotalFin}</TableCell>
+                              <TableCell></TableCell>
+                              <TableCell className="text-right font-mono text-xs font-bold">{fmt(subtotalMonto)}</TableCell>
                               <TableCell className="text-right font-mono text-xs font-bold">
-                                {fmt(allInvoices.reduce((s, i) => s + i.monto, 0))}
+                                {fmt(selectedContractDetails.items.reduce((s, i) => s + i.deductivo, 0))}
                               </TableCell>
                               <TableCell className="text-right font-mono text-xs font-bold">
-                                {fmt(allInvoices.reduce((s, i) => s + i.retencion, 0))}
+                                {fmt(selectedContractDetails.items.reduce((s, i) => s + i.amountNet, 0))}
+                              </TableCell>
+                              <TableCell></TableCell>
+                            </TableRow>
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </CollapsibleContent>
+                  </div>
+                </Collapsible>
+
+                {/* ============ BLOQUE 3: Detalle de Pagos y Facturas (Collapsible) ============ */}
+                <Collapsible open={isBlockOpen('pagos')} onOpenChange={() => toggleBlock('pagos')}>
+                  <div className="border-b">
+                    <CollapsibleTrigger asChild>
+                      <button className="w-full px-4 py-2 bg-muted/20 flex items-center gap-2 hover:bg-muted/40 transition-colors cursor-pointer">
+                        {isBlockOpen('pagos') ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                        <h4 className="text-sm font-medium text-foreground">Detalle de Pagos y Financiero</h4>
+                      </button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="bg-muted/40">
+                              <TableHead className="w-[120px]">Contrato / Adenda</TableHead>
+                              <TableHead className="text-right text-green-600">Pagos</TableHead>
+                              <TableHead className="text-right">Provisiones</TableHead>
+                              <TableHead className="text-right">O. Servicio</TableHead>
+                              <TableHead className="text-right">O. Cambio</TableHead>
+                              <TableHead className="text-right">Garantias</TableHead>
+                              <TableHead className="text-right font-bold text-primary">Saldo x Pagar</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {selectedContractDetails.items.map((row) => (
+                              <TableRow key={row.key} className="hover:bg-muted/30 transition-colors">
+                                <TableCell className="text-xs font-medium">
+                                  {row.addendumId === '0' ? 'Contrato' : `Adenda ${row.addendumId}`}
+                                </TableCell>
+                                <TableCell className="text-right font-mono text-xs text-green-700/80 font-medium">{fmt(row.payments)}</TableCell>
+                                <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(row.provisions)}</TableCell>
+                                <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(row.serviceOrders)}</TableCell>
+                                <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(row.changeOrders)}</TableCell>
+                                <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(row.guarantees)}</TableCell>
+                                <TableCell className="text-right font-mono text-xs font-bold">{fmt(row.saldoPorPagar)}</TableCell>
+                              </TableRow>
+                            ))}
+                            <TableRow className="bg-muted/50 font-medium">
+                              <TableCell className="text-xs font-bold">Subtotal</TableCell>
+                              <TableCell className="text-right font-mono text-xs font-bold text-green-700/80">
+                                {fmt(selectedContractDetails.items.reduce((s, i) => s + i.payments, 0))}
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-xs font-bold">
+                                {fmt(selectedContractDetails.items.reduce((s, i) => s + i.provisions, 0))}
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-xs font-bold">
+                                {fmt(selectedContractDetails.items.reduce((s, i) => s + i.serviceOrders, 0))}
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-xs font-bold">
+                                {fmt(selectedContractDetails.items.reduce((s, i) => s + i.changeOrders, 0))}
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-xs font-bold">
+                                {fmt(selectedContractDetails.items.reduce((s, i) => s + i.guarantees, 0))}
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-xs font-bold">
+                                {fmt(selectedContractDetails.items.reduce((s, i) => s + i.saldoPorPagar, 0))}
                               </TableCell>
                             </TableRow>
                           </TableBody>
                         </Table>
                       </div>
-                    </div>
-                  );
-                })()}
 
-                {/* ============ BLOQUE 4: Datos Adicionales (E_ Sheets) ============ */}
-                {contractSpecialized.length > 0 && (
-                  <div className="border-t">
-                    <div className="px-4 py-2 bg-blue-50/50">
-                      <h4 className="text-sm font-medium text-foreground">Datos Adicionales</h4>
-                    </div>
-                    <div className="px-4 py-3 space-y-3">
-                      {contractSpecialized.map((sheet) => (
-                        <div key={sheet.sheetType}>
-                          <Badge variant="secondary" className="text-[10px] mb-2">{sheet.label}</Badge>
-                          <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                            {sheet.fields.map((f) => (
-                              <div key={f.label} className="text-center p-1.5 rounded bg-muted/40 border">
-                                <div className="text-[9px] text-muted-foreground uppercase tracking-wide leading-tight">{f.label}</div>
-                                <div className="text-xs font-mono font-bold mt-0.5">{fmtField(f)}</div>
-                              </div>
-                            ))}
+                      {/* Detalle de Facturas (dentro de Pagos) */}
+                      {(() => {
+                        const allInvoices = selectedContractDetails.items.flatMap(item =>
+                          item.paymentsList.map(p => ({ ...p, adenda: item.addendumId }))
+                        );
+                        if (allInvoices.length === 0) return null;
+                        return (
+                          <div className="border-t">
+                            <div className="px-4 py-1.5 bg-muted/10">
+                              <span className="text-xs font-medium text-muted-foreground">Facturas ({allInvoices.length})</span>
+                            </div>
+                            <div className="overflow-x-auto">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow className="bg-muted/20">
+                                    <TableHead className="text-xs">Adenda</TableHead>
+                                    <TableHead className="text-xs">Valorizacion</TableHead>
+                                    <TableHead className="text-xs">Descripcion</TableHead>
+                                    <TableHead className="text-xs">Factura</TableHead>
+                                    <TableHead className="text-xs">Fecha Contabilizacion</TableHead>
+                                    <TableHead className="text-right text-xs">Monto (sin IGV)</TableHead>
+                                    <TableHead className="text-right text-xs">Retencion</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {allInvoices.map((inv, idx) => (
+                                    <TableRow key={idx} className="hover:bg-muted/20 transition-colors">
+                                      <TableCell className="text-xs">{inv.adenda === '0' ? 'Contrato' : `Adenda ${inv.adenda}`}</TableCell>
+                                      <TableCell className="text-xs font-medium">{inv.valorizacion || '-'}</TableCell>
+                                      <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate" title={inv.descripcion}>{inv.descripcion || '-'}</TableCell>
+                                      <TableCell className="text-xs font-medium">{inv.factura || '-'}</TableCell>
+                                      <TableCell className="text-xs">{inv.fechaContabilizacion || '-'}</TableCell>
+                                      <TableCell className="text-right font-mono text-xs">{fmt(inv.monto)}</TableCell>
+                                      <TableCell className="text-right font-mono text-xs text-muted-foreground">{fmt(inv.retencion)}</TableCell>
+                                    </TableRow>
+                                  ))}
+                                  <TableRow className="bg-muted/40 font-medium">
+                                    <TableCell className="text-xs font-bold" colSpan={5}>Total Facturas</TableCell>
+                                    <TableCell className="text-right font-mono text-xs font-bold">
+                                      {fmt(allInvoices.reduce((s, i) => s + i.monto, 0))}
+                                    </TableCell>
+                                    <TableCell className="text-right font-mono text-xs font-bold">
+                                      {fmt(allInvoices.reduce((s, i) => s + i.retencion, 0))}
+                                    </TableCell>
+                                  </TableRow>
+                                </TableBody>
+                              </Table>
+                            </div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
+                        );
+                      })()}
+                    </CollapsibleContent>
                   </div>
+                </Collapsible>
+
+                {/* ============ BLOQUE 4: Datos Adicionales (E_ Sheets) (Collapsible) ============ */}
+                {contractSpecialized.length > 0 && (
+                  <Collapsible open={isBlockOpen('specialized')} onOpenChange={() => toggleBlock('specialized')}>
+                    <div className="border-t">
+                      <CollapsibleTrigger asChild>
+                        <button className="w-full px-4 py-2 bg-blue-50/50 flex items-center gap-2 hover:bg-blue-100/50 transition-colors cursor-pointer">
+                          {isBlockOpen('specialized') ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                          <h4 className="text-sm font-medium text-foreground">Datos Adicionales</h4>
+                        </button>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <div className="px-4 py-3 space-y-3">
+                          {contractSpecialized.map((sheet) => (
+                            <div key={sheet.sheetType}>
+                              <Badge variant="secondary" className="text-[10px] mb-2">{sheet.label}</Badge>
+                              <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                                {sheet.fields.map((f) => (
+                                  <div key={f.label} className="text-center p-1.5 rounded bg-muted/40 border">
+                                    <div className="text-[9px] text-muted-foreground uppercase tracking-wide leading-tight">{f.label}</div>
+                                    <div className="text-xs font-mono font-bold mt-0.5">{fmtField(f)}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </CollapsibleContent>
+                    </div>
+                  </Collapsible>
                 )}
              </div>
             );

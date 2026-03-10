@@ -49,3 +49,10 @@
     @apply font-heading font-semibold tracking-tight;
   }
 }
+
+@media print {
+  body {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
