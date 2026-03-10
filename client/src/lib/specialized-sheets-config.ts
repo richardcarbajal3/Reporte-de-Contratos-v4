@@ -12,6 +12,9 @@
 //   count - Count of non-empty values
 //   first - First non-empty value (useful for text fields)
 
+/** Strip accents/diacritics: "ÁREA" → "AREA", "Descripción" → "Descripcion" */
+const stripAccents = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
 export type AggregationType = 'sum' | 'max' | 'min' | 'avg' | 'count' | 'first';
 
 export interface SpecializedFieldDef {
@@ -40,7 +43,7 @@ export const SPECIALIZED_SHEET_CONFIGS: SpecializedSheetConfig[] = [
     sheetType: 'arrendamiento',
     label: 'Uso de Terreno / Arrendamiento',
     fields: [
-      { column: 'PLAZO AÑOS',       label: 'Plazo Años',       aggregation: 'max',   format: 'number', decimals: 1 },
+      { column: 'PLAZO ANOS',        label: 'Plazo Años',       aggregation: 'max',   format: 'number', decimals: 1 },
       { column: 'VIGENCIA2',        label: 'Vigencia',         aggregation: 'max',   format: 'text' },
       { column: 'PAGO ANUAL (US$)', label: 'Pago Anual (US$)', aggregation: 'sum',   format: 'currency' },
       { column: 'AREA (M2)',        label: 'Area (m2)',        aggregation: 'sum',   format: 'number', decimals: 2 },
@@ -82,10 +85,10 @@ export function autoGenerateConfig(
   sampleRow: Record<string, any>
 ): SpecializedSheetConfig {
   const fields: SpecializedFieldDef[] = [];
-  const skipKeys = new Set(['CONTRATO', 'N° CONTRATO', 'N CONTRATO', 'ADENDA']);
+  const skipKeys = new Set(['CONTRATO', 'N° CONTRATO', 'N CONTRATO', 'ADENDA', 'CONTRATO + ADENDA', 'ITEM']);
 
   for (const [key, value] of Object.entries(sampleRow)) {
-    const upperKey = key.trim().toUpperCase().replace(/\s+/g, ' ');
+    const upperKey = stripAccents(key.trim().toUpperCase().replace(/\s+/g, ' '));
     if (skipKeys.has(upperKey)) continue;
     // Skip duplicate lowercase keys (NORMALIZE_HEADERS creates both)
     if (key !== upperKey && sampleRow[upperKey] !== undefined) continue;
@@ -151,12 +154,18 @@ export function aggregateSpecializedData(
     const aggregatedFields: AggregatedField[] = [];
 
     for (const fieldDef of config.fields) {
+      const strippedColumn = stripAccents(fieldDef.column);
       const values = rows
         .map((r: Record<string, any>) => {
-          // Try exact match first, then case-insensitive
+          // Try exact match first
           let val = r[fieldDef.column];
+          // Try accent-stripped key (E_ sheet data already has stripped keys)
+          if (val === undefined) val = r[strippedColumn];
+          // Fallback: search all keys with accent stripping
           if (val === undefined) {
-            const key = Object.keys(r).find(k => k.trim().toUpperCase().replace(/\s+/g, ' ') === fieldDef.column);
+            const key = Object.keys(r).find(k =>
+              stripAccents(k.trim().toUpperCase().replace(/\s+/g, ' ')) === strippedColumn
+            );
             if (key) val = r[key];
           }
           return val;
@@ -266,11 +275,18 @@ export function computeExecutiveKpis(
     const rows = byType.get(def.sheetType.toLowerCase());
     if (!rows || rows.length === 0) continue;
 
+    const strippedColumn = stripAccents(def.column);
     const values = rows
       .map(r => {
+        // Try exact match first
         let val = r[def.column];
+        // Try accent-stripped key (E_ sheet data already has stripped keys)
+        if (val === undefined) val = r[strippedColumn];
+        // Fallback: search all keys with accent stripping
         if (val === undefined) {
-          const key = Object.keys(r).find(k => k.trim().toUpperCase().replace(/\s+/g, ' ') === def.column);
+          const key = Object.keys(r).find(k =>
+            stripAccents(k.trim().toUpperCase().replace(/\s+/g, ' ')) === strippedColumn
+          );
           if (key) val = r[key];
         }
         return val;
