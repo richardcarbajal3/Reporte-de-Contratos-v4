@@ -62,11 +62,12 @@ function resolveSheetName(
 
 function detectHeaderRow(
   sheet: XLSX.WorkSheet,
-  canonicalName: string,
-  maxScanRows = 30
+  canonicalName?: string,
+  maxScanRows = 30,
+  customAnchors?: string[]
 ): number {
   const rawRows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-  const anchors = (SHEET_ANCHOR_HEADERS[canonicalName] || [])
+  const anchors = (customAnchors || SHEET_ANCHOR_HEADERS[canonicalName || ''] || [])
     .map(a => a.toUpperCase());
 
   // Pass 1: anchor-based detection
@@ -119,36 +120,6 @@ interface SheetResolution {
 /** Strip accents/diacritics from a string: "ÁREA" → "AREA", "Descripción" → "Descripcion" */
 const stripAccents = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
-/** Specialized header detection for E_ sheets — looks for CONTRATO column */
-function detectHeaderRowForESheet(
-  sheet: XLSX.WorkSheet,
-  maxScanRows = 30
-): number {
-  const rawRows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-
-  for (let i = 0; i < Math.min(rawRows.length, maxScanRows); i++) {
-    const row = rawRows[i];
-    if (!row) continue;
-    const cellValues = row
-      .map((cell: any) => (cell != null ? String(cell).trim().toUpperCase() : ''))
-      .filter((v: string) => v.length > 0);
-
-    // Look for CONTRATO in the row
-    if (cellValues.some((v: string) => v.includes('CONTRATO'))) {
-      return i;
-    }
-  }
-
-  // Fallback: density heuristic
-  for (let i = 0; i < Math.min(rawRows.length, maxScanRows); i++) {
-    const row = rawRows[i];
-    if (!row) continue;
-    const nonEmpty = row.filter((cell: any) => cell != null && String(cell).trim() !== '');
-    if (nonEmpty.length >= 3) return i;
-  }
-
-  return 0;
-}
 
 function normalizeWorkbook(workbook: XLSX.WorkBook): {
   workbook: XLSX.WorkBook;
@@ -665,14 +636,23 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
           const sheetLabel = sheetType.charAt(0).toUpperCase() + sheetType.slice(1);
 
           const rawSheet = rawWorkbook.Sheets[eSheetName];
-          // Use a custom header detection with CONTRATO as anchor for E_ sheets
-          const eHeaderRow = detectHeaderRowForESheet(rawSheet);
+          // Reuse the same robust header detection as normal sheets, with CONTRATO+ADENDA as anchors
+          const eHeaderRow = detectHeaderRow(rawSheet, undefined, 30, ['CONTRATO', 'ADENDA']);
           const eRows = extractSheetData(rawSheet, eHeaderRow);
 
           console.log(`[E_ Sheet] "${eSheetName}": ${eRows.length} filas, header en fila ${eHeaderRow + 1}`);
           if (eRows.length > 0) {
             const sampleRow = NORMALIZE_HEADERS(eRows[0]);
-            console.log(`[E_ Sheet] "${eSheetName}" columnas:`, Object.keys(sampleRow).filter(k => k === k.toUpperCase()));
+            const upperKeys = Object.keys(sampleRow).filter(k => k === k.toUpperCase());
+            console.log(`[E_ Sheet] "${eSheetName}" columnas (${upperKeys.length}):`, upperKeys);
+
+            // Log contract ID detection for first row
+            let testId: any;
+            for (const [key, value] of Object.entries(sampleRow)) {
+              const upper = key.trim().toUpperCase().replace(/\s+/g, ' ');
+              if (/^N.?\s?CONTRATO$/.test(upper)) { testId = value; break; }
+            }
+            console.log(`[E_ Sheet] "${eSheetName}" primer contrato ID:`, testId ?? 'NO ENCONTRADO');
           }
 
           let matchCount = 0;
@@ -696,12 +676,32 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
               }
             }
 
-            // Fallback: look for standalone "CONTRATO" column (not "CONTRATO + ADENDA")
+            // Fallback 1: look for standalone "CONTRATO" column (not "CONTRATO + ADENDA")
             if (!rawContractId) {
               for (const [key, value] of Object.entries(r)) {
                 const upper = key.trim().toUpperCase().replace(/\s+/g, ' ');
                 if (upper === 'CONTRATO') {
                   rawContractId = value;
+                  break;
+                }
+              }
+            }
+
+            // Fallback 2: parse "CONTRATO + ADENDA" combined column (e.g., "SGR-022-0")
+            if (!rawContractId) {
+              for (const [key, value] of Object.entries(r)) {
+                const upper = key.trim().toUpperCase().replace(/\s+/g, ' ');
+                if (upper.includes('CONTRATO') && upper.includes('ADENDA')) {
+                  const combined = String(value).trim();
+                  const lastDash = combined.lastIndexOf('-');
+                  if (lastDash > 0) {
+                    rawContractId = combined.substring(0, lastDash);
+                    if (adendaVal === undefined || adendaVal === null) {
+                      adendaVal = combined.substring(lastDash + 1);
+                    }
+                  } else {
+                    rawContractId = combined;
+                  }
                   break;
                 }
               }
@@ -771,7 +771,17 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
             }
           });
 
-          console.log(`[E_ Sheet] "${eSheetName}": ${matchCount} filas vinculadas, ${missCount} sin match`);
+          console.log(`[E_ Sheet] "${eSheetName}": ${matchCount} vinculadas, ${missCount} sin match de ${eRows.length} filas`);
+          if (matchCount === 0 && eRows.length > 0) {
+            const sampleIds = eRows.slice(0, 3).map(row => {
+              const r2 = NORMALIZE_HEADERS(row);
+              for (const [k, v] of Object.entries(r2)) {
+                if (/^N.?\s?CONTRATO$/.test(k.trim().toUpperCase().replace(/\s+/g, ' '))) return v;
+              }
+              return '?';
+            });
+            console.warn(`[E_ Sheet] WARNING: 0 matches! E_ IDs:`, sampleIds, `contractsMap keys:`, Array.from(contractsMap.keys()).slice(0, 5));
+          }
         }
 
         // 4. Calculate Balances
