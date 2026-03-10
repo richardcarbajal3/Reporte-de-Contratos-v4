@@ -27,6 +27,16 @@ export default function ExecutiveView() {
   const [selectedStateFilter, setSelectedStateFilter] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Helper: classify raw ESTADO into main category using substring matching
+  // Handles prefixed states like "3 CERRADO (i)", "2.0 EJECUCION", etc.
+  // IMPORTANT: Must be defined before any useMemo that references it to avoid TDZ.
+  const getMainStateCategory = (state: string): string => {
+    const s = state.toUpperCase().trim();
+    if (s.includes('CERRADO')) return 'CERRADOS';
+    if (s.includes('EJECUCION')) return 'EJECUCION';
+    return 'FINIQUITO';
+  };
+
   // Scroll to detail section when categories are selected
   useEffect(() => {
     if (selectedCategories.length > 0 && scrollRef.current) {
@@ -67,21 +77,24 @@ export default function ExecutiveView() {
     return consolidated.filter(c => c.items.some(i => selectedContractClasses.includes(i.contractClass || '')));
   }, [consolidated, selectedContractClasses]);
 
-  // Helper: classify raw ESTADO into main category using substring matching
-  // Handles prefixed states like "3 CERRADO (i)", "2.0 EJECUCION", etc.
-  const getMainStateCategory = (state: string): string => {
-    const s = state.toUpperCase().trim();
-    if (s.includes('CERRADO')) return 'CERRADOS';
-    if (s.includes('EJECUCION')) return 'EJECUCION';
-    return 'FINIQUITO';
-  };
-
   // Status hierarchy for Estado Contratos KPI card
+  // Responds to class filter AND category selection from pie chart
   const statusHierarchy = useMemo(() => {
+    const source = selectedCategories.length > 0
+      ? filteredByClassConsolidated.filter(c =>
+          c.items.some(item => {
+            const key = viewMode === "type"
+              ? (item.investmentType || 'Otros')
+              : (item.investmentGroup || 'Sin Grupo');
+            return selectedCategories.includes(key);
+          })
+        )
+      : filteredByClassConsolidated;
+
     const mainCounts: Record<string, number> = { EJECUCION: 0, FINIQUITO: 0, CERRADOS: 0 };
     const finiquitoSubs: Record<string, number> = {};
 
-    filteredByClassConsolidated.forEach(c => {
+    source.forEach(c => {
       const raw = c.state?.trim() || 'Sin Estado';
       const main = getMainStateCategory(raw);
       mainCounts[main] = (mainCounts[main] || 0) + 1;
@@ -91,7 +104,7 @@ export default function ExecutiveView() {
     });
 
     return { mainCounts, finiquitoSubs };
-  }, [filteredByClassConsolidated]);
+  }, [filteredByClassConsolidated, selectedCategories, viewMode]);
 
   // Apply state filter on top of class filter
   const filteredByStateConsolidated = useMemo(() => {
@@ -262,6 +275,7 @@ export default function ExecutiveView() {
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
 
   // Monthly payments aggregation with contract-level detail
+  // Responds to class, state, AND category selection from pie chart
   const { monthlyPaymentsData, monthlyPaymentsDetail } = useMemo(() => {
     const monthMap: Record<string, { month: string; monto: number }> = {};
     const detailMap: Record<string, { contractId: string; description: string; company: string; monto: number }[]> = {};
@@ -272,6 +286,20 @@ export default function ExecutiveView() {
       : contracts;
     if (stateFilteredContractIds) {
       contractsToUse = contractsToUse.filter(c => stateFilteredContractIds.has(c.contractId));
+    }
+    // Filter by selected categories (group/type from pie chart)
+    if (selectedCategories.length > 0) {
+      const categoryContractIds = new Set(
+        filteredByStateConsolidated
+          .filter(c => c.items.some(item => {
+            const key = viewMode === "type"
+              ? (item.investmentType || 'Otros')
+              : (item.investmentGroup || 'Sin Grupo');
+            return selectedCategories.includes(key);
+          }))
+          .map(c => c.contractId)
+      );
+      contractsToUse = contractsToUse.filter(c => categoryContractIds.has(c.contractId));
     }
 
     contractsToUse.forEach(c => {
@@ -303,7 +331,7 @@ export default function ExecutiveView() {
       monthlyPaymentsData: sorted.map(([key, v]) => ({ ...v, key })),
       monthlyPaymentsDetail: detailMap,
     };
-  }, [contracts, selectedContractClasses, stateFilteredContractIds]);
+  }, [contracts, selectedContractClasses, stateFilteredContractIds, selectedCategories, viewMode, filteredByStateConsolidated]);
 
   // Aggregate detail by contract for selected month (enriched with cumulative progress)
   const selectedMonthDetail = useMemo(() => {

@@ -116,6 +116,37 @@ interface SheetResolution {
   headerRow: number;
 }
 
+/** Specialized header detection for E_ sheets — looks for CONTRATO column */
+function detectHeaderRowForESheet(
+  sheet: XLSX.WorkSheet,
+  maxScanRows = 30
+): number {
+  const rawRows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+  for (let i = 0; i < Math.min(rawRows.length, maxScanRows); i++) {
+    const row = rawRows[i];
+    if (!row) continue;
+    const cellValues = row
+      .map((cell: any) => (cell != null ? String(cell).trim().toUpperCase() : ''))
+      .filter((v: string) => v.length > 0);
+
+    // Look for CONTRATO in the row
+    if (cellValues.some((v: string) => v.includes('CONTRATO'))) {
+      return i;
+    }
+  }
+
+  // Fallback: density heuristic
+  for (let i = 0; i < Math.min(rawRows.length, maxScanRows); i++) {
+    const row = rawRows[i];
+    if (!row) continue;
+    const nonEmpty = row.filter((cell: any) => cell != null && String(cell).trim() !== '');
+    if (nonEmpty.length >= 3) return i;
+  }
+
+  return 0;
+}
+
 function normalizeWorkbook(workbook: XLSX.WorkBook): {
   workbook: XLSX.WorkBook;
   resolutions: SheetResolution[];
@@ -605,24 +636,41 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
         // These are discovered from the RAW workbook since normalizeWorkbook discards unmapped sheets.
         const eSheetNames = rawWorkbook.SheetNames.filter(name => /^E_/i.test(name));
 
+        // Build a lookup of contractId → keys for flexible matching
+        const contractIdToKeys = new Map<string, string[]>();
+        contractsMap.forEach((c, key) => {
+          const existing = contractIdToKeys.get(c.contractId) || [];
+          existing.push(key);
+          contractIdToKeys.set(c.contractId, existing);
+        });
+
         for (const eSheetName of eSheetNames) {
           const sheetType = eSheetName.replace(/^E_/i, '').toLowerCase();
           const sheetLabel = sheetType.charAt(0).toUpperCase() + sheetType.slice(1);
 
           const rawSheet = rawWorkbook.Sheets[eSheetName];
-          const eHeaderRow = detectHeaderRow(rawSheet, eSheetName);
+          // Use a custom header detection with CONTRATO as anchor for E_ sheets
+          const eHeaderRow = detectHeaderRowForESheet(rawSheet);
           const eRows = extractSheetData(rawSheet, eHeaderRow);
 
-          console.log(`Hoja especializada "${eSheetName}" detectada: ${eRows.length} filas, header en fila ${eHeaderRow + 1}`);
+          console.log(`[E_ Sheet] "${eSheetName}": ${eRows.length} filas, header en fila ${eHeaderRow + 1}`);
+          if (eRows.length > 0) {
+            const sampleRow = NORMALIZE_HEADERS(eRows[0]);
+            console.log(`[E_ Sheet] "${eSheetName}" columnas:`, Object.keys(sampleRow).filter(k => k === k.toUpperCase()));
+          }
+
+          let matchCount = 0;
+          let missCount = 0;
 
           eRows.forEach((row: any) => {
             const r = NORMALIZE_HEADERS(row);
-            const contractId = r['CONTRATO'] || r['N° CONTRATO'] || r['N CONTRATO'];
-            if (!contractId) return;
+            const rawContractId = r['CONTRATO'] || r['N° CONTRATO'] || r['N CONTRATO'] || r['NO CONTRATO'];
+            if (!rawContractId) return;
+            const contractId = String(rawContractId).trim();
 
             // Build data object from all non-identifier columns (use only uppercase keys to avoid dupes)
             const data: Record<string, any> = {};
-            const skipKeys = new Set(['CONTRATO', 'N° CONTRATO', 'N CONTRATO', 'ADENDA']);
+            const skipKeys = new Set(['CONTRATO', 'N° CONTRATO', 'N CONTRATO', 'NO CONTRATO', 'ADENDA']);
             const seenKeys = new Set<string>();
 
             for (const [key, value] of Object.entries(r)) {
@@ -640,17 +688,34 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
             const primaryContract = contractsMap.get(primaryKey);
             if (primaryContract) {
               primaryContract.specializedData.push({ sheetType, sheetLabel, data });
+              matchCount++;
             } else {
-              // Fallback: find any addendum for this contract
+              // Fallback: find any addendum for this contract by matching contractId
               let found = false;
-              contractsMap.forEach((c) => {
-                if (!found && c.contractId === String(contractId)) {
-                  c.specializedData.push({ sheetType, sheetLabel, data });
+              const keys = contractIdToKeys.get(contractId);
+              if (keys) {
+                const contract = contractsMap.get(keys[0]);
+                if (contract) {
+                  contract.specializedData.push({ sheetType, sheetLabel, data });
                   found = true;
+                  matchCount++;
                 }
-              });
+              }
+              if (!found) {
+                // Try loose matching: trim and compare as strings
+                contractsMap.forEach((c) => {
+                  if (!found && c.contractId.trim() === contractId) {
+                    c.specializedData.push({ sheetType, sheetLabel, data });
+                    found = true;
+                    matchCount++;
+                  }
+                });
+              }
+              if (!found) missCount++;
             }
           });
+
+          console.log(`[E_ Sheet] "${eSheetName}": ${matchCount} filas vinculadas, ${missCount} sin match`);
         }
 
         // 4. Calculate Balances
