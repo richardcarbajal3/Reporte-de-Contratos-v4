@@ -214,6 +214,84 @@ function computeTextAggregation(agg: AggregationType, values: any[]): string {
   }
 }
 
+// ============================================================
+// Executive KPI Definitions
+// ============================================================
+// Configure which fields from E_ sheets appear as KPI cards
+// in the Executive view. Only KPIs with actual data will render.
+// To add new KPIs, simply add entries to EXECUTIVE_KPIS array.
+
+export interface ExecutiveKpiDef {
+  sheetType: string;           // which E_ sheet (lowercase, e.g. 'arrendamiento')
+  column: string;              // column to aggregate (UPPERCASE)
+  label: string;               // display label
+  aggregation: AggregationType;
+  format: 'number' | 'currency' | 'percent' | 'text';
+  decimals?: number;
+}
+
+export const EXECUTIVE_KPIS: ExecutiveKpiDef[] = [
+  { sheetType: 'arrendamiento', column: 'PAGO ANUAL (US$)', label: 'Pago Anual Arrend.', aggregation: 'sum', format: 'currency' },
+  { sheetType: 'arrendamiento', column: 'AREA (HA)',        label: 'Área Total (Ha)',    aggregation: 'sum', format: 'number', decimals: 2 },
+  { sheetType: 'arrendamiento', column: 'USD/HA',           label: 'Prom. USD/ha',       aggregation: 'avg', format: 'currency' },
+  { sheetType: 'obras',         column: 'M2',               label: 'M2 Total Obras',     aggregation: 'sum', format: 'number', decimals: 2 },
+];
+
+export interface ComputedKpi {
+  label: string;
+  value: number | string;
+  format: 'number' | 'currency' | 'percent' | 'text';
+  decimals: number;
+}
+
+/**
+ * Compute executive KPIs from specialized sheet entries.
+ * Returns only KPIs that have actual data.
+ */
+export function computeExecutiveKpis(
+  entries: { sheetType: string; data: Record<string, any> }[],
+  kpiDefs: ExecutiveKpiDef[] = EXECUTIVE_KPIS,
+  parseNumber: (val: any) => number = defaultParseNumber
+): ComputedKpi[] {
+  // Group entries by sheetType
+  const byType = new Map<string, Record<string, any>[]>();
+  for (const entry of entries) {
+    const key = entry.sheetType.toLowerCase();
+    if (!byType.has(key)) byType.set(key, []);
+    byType.get(key)!.push(entry.data);
+  }
+
+  const results: ComputedKpi[] = [];
+  for (const def of kpiDefs) {
+    const rows = byType.get(def.sheetType.toLowerCase());
+    if (!rows || rows.length === 0) continue;
+
+    const values = rows
+      .map(r => {
+        let val = r[def.column];
+        if (val === undefined) {
+          const key = Object.keys(r).find(k => k.trim().toUpperCase().replace(/\s+/g, ' ') === def.column);
+          if (key) val = r[key];
+        }
+        return val;
+      })
+      .filter(v => v !== undefined && v !== null && String(v).trim() !== '');
+
+    if (values.length === 0) continue;
+
+    const nums = values.map(v => parseNumber(v));
+    const result = computeNumericAggregation(def.aggregation, nums);
+
+    results.push({
+      label: def.label,
+      value: result,
+      format: def.format,
+      decimals: def.decimals ?? 2,
+    });
+  }
+  return results;
+}
+
 function defaultParseNumber(val: any): number {
   if (typeof val === 'number') return val;
   if (!val) return 0;
