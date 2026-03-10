@@ -845,8 +845,16 @@ export default function ExecutiveView() {
                         <TableCell className="text-right font-mono text-xs text-green-600">
                           {c.totalPaid.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
                         </TableCell>
-                        <TableCell className="text-center font-mono text-xs text-blue-600 font-medium">
-                          {percentPaid.toFixed(1)}%
+                        <TableCell className="text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            <div className="w-16 h-2 bg-secondary rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-blue-500 transition-all duration-500"
+                                style={{ width: `${Math.min(percentPaid, 100)}%` }}
+                              />
+                            </div>
+                            <span className="font-mono text-xs text-blue-600 font-medium">{percentPaid.toFixed(1)}%</span>
+                          </div>
                         </TableCell>
                         <TableCell className="text-right font-mono text-xs text-orange-600">
                           {(c.totalRetention + c.totalGuarantees).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
@@ -879,12 +887,23 @@ export default function ExecutiveView() {
                         <TableCell className="text-right font-mono text-green-700">
                           {filteredConsolidatedContracts.reduce((a, b) => a + b.totalPaid, 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
                         </TableCell>
-                        <TableCell className="text-center font-mono text-blue-700">
-                          {(
-                            filteredConsolidatedContracts.reduce((a, b) => a + b.totalAmount, 0) > 0 
-                            ? (filteredConsolidatedContracts.reduce((a, b) => a + b.totalPaid, 0) / filteredConsolidatedContracts.reduce((a, b) => a + b.totalAmount, 0) * 100)
-                            : 0
-                          ).toFixed(1)}%
+                        <TableCell className="text-center">
+                          {(() => {
+                            const totalAmt = filteredConsolidatedContracts.reduce((a, b) => a + b.totalAmount, 0);
+                            const totalPaidAmt = filteredConsolidatedContracts.reduce((a, b) => a + b.totalPaid, 0);
+                            const pct = totalAmt > 0 ? (totalPaidAmt / totalAmt) * 100 : 0;
+                            return (
+                              <div className="flex items-center justify-center gap-2">
+                                <div className="w-16 h-2 bg-secondary rounded-full overflow-hidden">
+                                  <div
+                                    className="h-full bg-blue-600 transition-all duration-500"
+                                    style={{ width: `${Math.min(pct, 100)}%` }}
+                                  />
+                                </div>
+                                <span className="font-mono text-blue-700">{pct.toFixed(1)}%</span>
+                              </div>
+                            );
+                          })()}
                         </TableCell>
                         <TableCell className="text-right font-mono text-orange-700">
                           {filteredConsolidatedContracts.reduce((a, b) => a + b.totalRetention + b.totalGuarantees, 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
