@@ -116,6 +116,9 @@ interface SheetResolution {
   headerRow: number;
 }
 
+/** Strip accents/diacritics from a string: "ÁREA" → "AREA", "Descripción" → "Descripcion" */
+const stripAccents = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
 /** Specialized header detection for E_ sheets — looks for CONTRATO column */
 function detectHeaderRowForESheet(
   sheet: XLSX.WorkSheet,
@@ -664,18 +667,41 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
 
           eRows.forEach((row: any) => {
             const r = NORMALIZE_HEADERS(row);
-            const rawContractId = r['CONTRATO'] || r['N° CONTRATO'] || r['N CONTRATO'] || r['NO CONTRATO'];
+            // Try multiple contract ID column names (accent-stripped for safety)
+            let rawContractId: any = undefined;
+            for (const [key, value] of Object.entries(r)) {
+              const stripped = stripAccents(key.trim().toUpperCase().replace(/\s+/g, ' '));
+              if (stripped === 'N° CONTRATO' || stripped === 'N CONTRATO' || stripped === 'NO CONTRATO') {
+                rawContractId = value;
+                break;
+              }
+            }
+            // Fallback: look for a plain 'CONTRATO' column (not 'CONTRATO + ADENDA')
+            if (!rawContractId) {
+              for (const [key, value] of Object.entries(r)) {
+                const stripped = stripAccents(key.trim().toUpperCase().replace(/\s+/g, ' '));
+                if (stripped === 'CONTRATO') {
+                  rawContractId = value;
+                  break;
+                }
+              }
+            }
             if (!rawContractId) return;
             const contractId = String(rawContractId).trim();
 
-            // Build data object from all non-identifier columns (use only uppercase keys to avoid dupes)
+            // Get ADENDA from the row for precise matching
+            const adendaVal = r['ADENDA'];
+            const adendaStr = adendaVal !== undefined && adendaVal !== null ? String(adendaVal).trim() : '0';
+
+            // Build data object from all non-identifier columns
+            // Strip accents from keys so "ÁREA (HA)" → "AREA (HA)" matching the config
             const data: Record<string, any> = {};
-            const skipKeys = new Set(['CONTRATO', 'N° CONTRATO', 'N CONTRATO', 'NO CONTRATO', 'ADENDA']);
+            const skipKeysRaw = new Set(['CONTRATO', 'N° CONTRATO', 'N CONTRATO', 'NO CONTRATO', 'ADENDA', 'CONTRATO + ADENDA', 'ITEM', 'ITEM']);
             const seenKeys = new Set<string>();
 
             for (const [key, value] of Object.entries(r)) {
-              const upperKey = key.trim().toUpperCase().replace(/\s+/g, ' ');
-              if (skipKeys.has(upperKey)) continue;
+              const upperKey = stripAccents(key.trim().toUpperCase().replace(/\s+/g, ' '));
+              if (skipKeysRaw.has(upperKey)) continue;
               if (seenKeys.has(upperKey)) continue;
               seenKeys.add(upperKey);
               if (value !== null && value !== undefined && String(value).trim() !== '') {
@@ -683,35 +709,43 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
               }
             }
 
-            // Attach to addendum 0 (primary), fallback to first matching addendum
-            const primaryKey = `${contractId}-0`;
-            const primaryContract = contractsMap.get(primaryKey);
-            if (primaryContract) {
-              primaryContract.specializedData.push({ sheetType, sheetLabel, data });
+            // Try precise match: contractId + adenda from E_ sheet row
+            const specificKey = `${contractId}-${adendaStr}`;
+            const specificContract = contractsMap.get(specificKey);
+            if (specificContract) {
+              specificContract.specializedData.push({ sheetType, sheetLabel, data });
               matchCount++;
             } else {
-              // Fallback: find any addendum for this contract by matching contractId
-              let found = false;
-              const keys = contractIdToKeys.get(contractId);
-              if (keys) {
-                const contract = contractsMap.get(keys[0]);
-                if (contract) {
-                  contract.specializedData.push({ sheetType, sheetLabel, data });
-                  found = true;
-                  matchCount++;
-                }
-              }
-              if (!found) {
-                // Try loose matching: trim and compare as strings
-                contractsMap.forEach((c) => {
-                  if (!found && c.contractId.trim() === contractId) {
-                    c.specializedData.push({ sheetType, sheetLabel, data });
+              // Fallback 1: try addendum 0
+              const primaryKey = `${contractId}-0`;
+              const primaryContract = contractsMap.get(primaryKey);
+              if (primaryContract) {
+                primaryContract.specializedData.push({ sheetType, sheetLabel, data });
+                matchCount++;
+              } else {
+                // Fallback 2: find any addendum for this contract by matching contractId
+                let found = false;
+                const keys = contractIdToKeys.get(contractId);
+                if (keys) {
+                  const contract = contractsMap.get(keys[0]);
+                  if (contract) {
+                    contract.specializedData.push({ sheetType, sheetLabel, data });
                     found = true;
                     matchCount++;
                   }
-                });
+                }
+                if (!found) {
+                  // Fallback 3: loose matching with trim
+                  contractsMap.forEach((c) => {
+                    if (!found && c.contractId.trim() === contractId) {
+                      c.specializedData.push({ sheetType, sheetLabel, data });
+                      found = true;
+                      matchCount++;
+                    }
+                  });
+                }
+                if (!found) missCount++;
               }
-              if (!found) missCount++;
             }
           });
 
