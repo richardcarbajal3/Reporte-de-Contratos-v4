@@ -396,7 +396,14 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
 
           // Key: CONTRATO + ADENDA
           // Try multiple variations
-          const contractId = r['N° CONTRATO'] || r['CONTRATO'] || r['N CONTRATO'] || r['NO CONTRATO']; 
+          let contractId = r['N° CONTRATO'] || r['CONTRATO'] || r['N CONTRATO'] || r['NO CONTRATO'];
+          // Regex fallback for Unicode ° vs º mismatch in "N° CONTRATO"
+          if (!contractId) {
+            for (const [hKey, hVal] of Object.entries(r)) {
+              const upper = hKey.trim().toUpperCase().replace(/\s+/g, ' ');
+              if (/^N.?\s?CONTRATO$/.test(upper)) { contractId = hVal; break; }
+            }
+          }
           const addendumId = r['ADENDA'];
           
           if (!contractId || addendumId === undefined) {
@@ -503,7 +510,13 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
             rows.forEach((row: any) => {
               const r = NORMALIZE_HEADERS(row);
               
-              const contractId = r['CONTRATO'] || r['N° CONTRATO'] || r['N CONTRATO'];
+              let contractId = r['CONTRATO'] || r['N° CONTRATO'] || r['N CONTRATO'];
+              if (!contractId) {
+                for (const [hKey, hVal] of Object.entries(r)) {
+                  const upper = hKey.trim().toUpperCase().replace(/\s+/g, ' ');
+                  if (/^N.?\s?CONTRATO$/.test(upper) || upper === 'CONTRATO') { contractId = hVal; break; }
+                }
+              }
               const addendumId = r['ADENDA'];
               
               if (contractId && addendumId !== undefined) {
@@ -667,20 +680,27 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
 
           eRows.forEach((row: any) => {
             const r = NORMALIZE_HEADERS(row);
-            // Try multiple contract ID column names (accent-stripped for safety)
+            // Find contract ID using regex — handles N°, Nº, N , NO, etc.
+            // The ° (U+00B0) vs º (U+00BA) mismatch breaks exact string matching
             let rawContractId: any = undefined;
+            let adendaVal: any = undefined;
+
             for (const [key, value] of Object.entries(r)) {
-              const stripped = stripAccents(key.trim().toUpperCase().replace(/\s+/g, ' '));
-              if (stripped === 'N° CONTRATO' || stripped === 'N CONTRATO' || stripped === 'NO CONTRATO') {
+              const upper = key.trim().toUpperCase().replace(/\s+/g, ' ');
+              // Match "N° CONTRATO", "Nº CONTRATO", "N CONTRATO", "NO CONTRATO"
+              if (!rawContractId && /^N.?\s?CONTRATO$/.test(upper)) {
                 rawContractId = value;
-                break;
+              }
+              if (upper === 'ADENDA') {
+                adendaVal = value;
               }
             }
-            // Fallback: look for a plain 'CONTRATO' column (not 'CONTRATO + ADENDA')
+
+            // Fallback: look for standalone "CONTRATO" column (not "CONTRATO + ADENDA")
             if (!rawContractId) {
               for (const [key, value] of Object.entries(r)) {
-                const stripped = stripAccents(key.trim().toUpperCase().replace(/\s+/g, ' '));
-                if (stripped === 'CONTRATO') {
+                const upper = key.trim().toUpperCase().replace(/\s+/g, ' ');
+                if (upper === 'CONTRATO') {
                   rawContractId = value;
                   break;
                 }
@@ -690,18 +710,20 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
             const contractId = String(rawContractId).trim();
 
             // Get ADENDA from the row for precise matching
-            const adendaVal = r['ADENDA'];
             const adendaStr = adendaVal !== undefined && adendaVal !== null ? String(adendaVal).trim() : '0';
 
             // Build data object from all non-identifier columns
             // Strip accents from keys so "ÁREA (HA)" → "AREA (HA)" matching the config
             const data: Record<string, any> = {};
-            const skipKeysRaw = new Set(['CONTRATO', 'N° CONTRATO', 'N CONTRATO', 'NO CONTRATO', 'ADENDA', 'CONTRATO + ADENDA', 'ITEM', 'ITEM']);
             const seenKeys = new Set<string>();
 
             for (const [key, value] of Object.entries(r)) {
               const upperKey = stripAccents(key.trim().toUpperCase().replace(/\s+/g, ' '));
-              if (skipKeysRaw.has(upperKey)) continue;
+              // Skip identifier columns using regex (avoids Unicode ° mismatch)
+              if (/^N.?\s?CONTRATO$/.test(upperKey)) continue;
+              if (upperKey === 'CONTRATO' || upperKey === 'ADENDA') continue;
+              if (upperKey.includes('CONTRATO +') || upperKey.includes('CONTRATO+')) continue;
+              if (/^ITEM$/i.test(upperKey)) continue;
               if (seenKeys.has(upperKey)) continue;
               seenKeys.add(upperKey);
               if (value !== null && value !== undefined && String(value).trim() !== '') {
