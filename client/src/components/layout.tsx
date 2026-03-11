@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
-import { LayoutDashboard, FileText, PieChart, Upload, PanelLeft, PanelLeftClose } from "lucide-react";
+import { LayoutDashboard, FileText, PieChart, Upload, PanelLeft, PanelLeftClose, Settings2 } from "lucide-react";
 import { useAppStore } from "@/store";
 
 interface SidebarProps {
@@ -18,6 +18,7 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
     { href: "/executive", icon: PieChart, label: "Reporte Ejecutivo", disabled: !hasData },
     { href: "/consolidated", icon: LayoutDashboard, label: "Consolidado", disabled: !hasData },
     { href: "/detail", icon: FileText, label: "Detalle Adendas", disabled: !hasData },
+    { href: "/kpis", icon: Settings2, label: "Configurar KPIs", disabled: false },
   ];
 
   return (
