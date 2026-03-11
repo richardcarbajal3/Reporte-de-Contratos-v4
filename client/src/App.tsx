@@ -8,6 +8,7 @@ import Home from "@/pages/home";
 import ExecutiveView from "@/pages/executive-view";
 import ConsolidatedView from "@/pages/consolidated-view";
 import DetailView from "@/pages/detail-view";
+import KpiConfig from "@/pages/kpi-config";
 
 function Router() {
   return (
@@ -16,6 +17,7 @@ function Router() {
       <Route path="/executive" component={ExecutiveView} />
       <Route path="/consolidated" component={ConsolidatedView} />
       <Route path="/detail" component={DetailView} />
+      <Route path="/kpis" component={KpiConfig} />
       <Route component={NotFound} />
     </Switch>
   );

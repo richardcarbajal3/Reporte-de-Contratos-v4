@@ -14,12 +14,14 @@ import { Separator } from "@/components/ui/separator";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
-import { aggregateSpecializedData, computeExecutiveKpis, computeStandardKpis, type AggregatedSheetData, type AggregatedField, type ComputedKpi } from "@/lib/specialized-sheets-config";
+import { aggregateSpecializedData, computeExecutiveKpis, computeStandardKpis, EXECUTIVE_KPIS, type AggregatedSheetData, type AggregatedField, type ComputedKpi } from "@/lib/specialized-sheets-config";
+import { useKpiConfigStore, getEffectiveKpis } from "@/lib/kpi-store";
 import type { SpecializedSheetEntry } from "@/lib/excel-processor";
 
 export default function ExecutiveView() {
   const contracts = useAppStore(s => s.contracts);
   const consolidated = useAppStore(s => s.consolidated);
+  const configuredKpis = useKpiConfigStore(s => getEffectiveKpis(s));
   const [viewMode, setViewMode] = useState<"type" | "group">("type");
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [selectedContractClasses, setSelectedContractClasses] = useState<string[]>([]);
@@ -149,9 +151,9 @@ export default function ExecutiveView() {
   const executiveKpis = useMemo((): ComputedKpi[] => {
     const allEntries = kpiSource.flatMap(c => c.items.flatMap(i => i.specializedData));
     if (allEntries.length === 0) return [];
-    const result = computeExecutiveKpis(allEntries);
+    const result = computeExecutiveKpis(allEntries, configuredKpis);
     return result;
-  }, [kpiSource]);
+  }, [kpiSource, configuredKpis]);
 
   // Standard KPIs from contract fields (always available)
   const standardKpis = useMemo((): ComputedKpi[] => {
