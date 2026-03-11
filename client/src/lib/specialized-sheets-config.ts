@@ -15,7 +15,7 @@
 import type { ConsolidatedContract } from './excel-processor';
 
 /** Strip accents/diacritics: "ÁREA" → "AREA", "Descripción" → "Descripcion" */
-const stripAccents = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+export const stripAccents = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
 export type AggregationType = 'sum' | 'max' | 'min' | 'avg' | 'count' | 'first';
 

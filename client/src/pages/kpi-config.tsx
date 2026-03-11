@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useKpiConfigStore, getEffectiveKpis } from '@/lib/kpi-store';
 import { useAvailableColumns } from '@/lib/use-available-columns';
-import { EXECUTIVE_KPIS, type ExecutiveKpiDef, type AggregationType } from '@/lib/specialized-sheets-config';
+import { EXECUTIVE_KPIS, stripAccents, type ExecutiveKpiDef, type AggregationType } from '@/lib/specialized-sheets-config';
+import { useAppStore } from '@/store';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -19,8 +20,9 @@ import {
 import {
   Collapsible, CollapsibleTrigger, CollapsibleContent,
 } from '@/components/ui/collapsible';
-import { Plus, Pencil, Trash2, RotateCcw, ChevronDown, Database } from 'lucide-react';
+import { Plus, Pencil, Trash2, RotateCcw, ChevronDown, Database, CheckCircle2, AlertTriangle, Link2 } from 'lucide-react';
 import { toast } from 'sonner';
+
 
 const AGGREGATION_OPTIONS: { value: AggregationType; label: string }[] = [
   { value: 'sum', label: 'Suma' },
@@ -51,6 +53,8 @@ export default function KpiConfigPage() {
   const store = useKpiConfigStore();
   const kpis = getEffectiveKpis(store);
   const availableCols = useAvailableColumns();
+  const consolidated = useAppStore((s) => s.consolidated);
+  const hasData = consolidated.length > 0;
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editIndex, setEditIndex] = useState<number | null>(null);
@@ -59,9 +63,47 @@ export default function KpiConfigPage() {
 
   const sheetTypes = [...availableCols.keys()];
 
-  function openAdd() {
+  // Build a flat set of all available columns (normalized) for validation
+  const allAvailableNormalized = useMemo(() => {
+    const map = new Map<string, Set<string>>(); // sheetType → Set<normalizedColumn>
+    for (const [type, info] of availableCols) {
+      const set = new Set<string>();
+      for (const col of info.columns) {
+        set.add(stripAccents(col.trim().toUpperCase().replace(/\s+/g, ' ')));
+      }
+      map.set(type, set);
+    }
+    return map;
+  }, [availableCols]);
+
+  // Diagnostics: total contracts with/without E_ data
+  const diagnostics = useMemo(() => {
+    if (!hasData) return null;
+    let withE = 0;
+    let withoutE = 0;
+    for (const c of consolidated) {
+      const has = c.items.some(i => i.specializedData.length > 0);
+      if (has) withE++; else withoutE++;
+    }
+    return { withE, withoutE, total: consolidated.length };
+  }, [consolidated, hasData]);
+
+  function kpiColumnExists(kpi: ExecutiveKpiDef): boolean | null {
+    if (!hasData || sheetTypes.length === 0) return null; // unknown
+    const cols = allAvailableNormalized.get(kpi.sheetType.toLowerCase());
+    if (!cols) return false; // sheet type not found
+    const normalized = stripAccents(kpi.column.trim().toUpperCase().replace(/\s+/g, ' '));
+    return cols.has(normalized);
+  }
+
+  function openAdd(preSheetType?: string, preColumn?: string) {
     setEditIndex(null);
-    setForm({ ...emptyForm, sheetType: sheetTypes[0] ?? '' });
+    setForm({
+      ...emptyForm,
+      sheetType: preSheetType ?? sheetTypes[0] ?? '',
+      column: preColumn ?? '',
+      label: preColumn ?? '',
+    });
     setDialogOpen(true);
   }
 
@@ -107,6 +149,10 @@ export default function KpiConfigPage() {
   const fmtLabel = (v: string) =>
     FORMAT_OPTIONS.find((o) => o.value === v)?.label ?? v;
 
+  const getColumnsForSheet = (sheetType: string): string[] => {
+    return availableCols.get(sheetType)?.columns ?? [];
+  };
+
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       {/* Header */}
@@ -123,6 +169,41 @@ export default function KpiConfigPage() {
         </Button>
       </div>
 
+      {/* Diagnostics panel */}
+      {hasData && (
+        <Card className={diagnostics && diagnostics.withE > 0 ? 'border-green-200 bg-green-50/30' : 'border-yellow-200 bg-yellow-50/30'}>
+          <CardContent className="py-3">
+            <div className="flex items-center gap-2 text-sm">
+              {diagnostics && diagnostics.withE > 0 ? (
+                <>
+                  <Link2 className="h-4 w-4 text-green-600" />
+                  <span>
+                    <strong>{diagnostics.withE}</strong> de {diagnostics.total} contratos tienen datos E_ vinculados
+                    {sheetTypes.length > 0 && (
+                      <span className="text-muted-foreground">
+                        {' '}({sheetTypes.map(t => {
+                          const info = availableCols.get(t)!;
+                          return `E_${t}: ${info.entryCount} registros en ${info.contractCount} contratos`;
+                        }).join(', ')})
+                      </span>
+                    )}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                  <span>
+                    Ningún contrato tiene datos E_ vinculados. Verifique que las hojas E_ del Excel tengan una columna
+                    <span className="font-mono mx-1">N° CONTRATO</span> o <span className="font-mono mx-1">CONTRATO + ADENDA</span>
+                    con IDs que coincidan con la hoja principal.
+                  </span>
+                </>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Available columns panel */}
       <Collapsible open={colsOpen} onOpenChange={setColsOpen}>
         <Card>
@@ -132,6 +213,11 @@ export default function KpiConfigPage() {
                 <CardTitle className="text-sm font-medium flex items-center gap-2">
                   <Database className="h-4 w-4" />
                   Columnas Disponibles en Datos Cargados
+                  {sheetTypes.length > 0 && (
+                    <Badge variant="secondary" className="text-xs ml-1">
+                      {sheetTypes.length} hoja{sheetTypes.length > 1 ? 's' : ''}
+                    </Badge>
+                  )}
                 </CardTitle>
                 <ChevronDown className={`h-4 w-4 transition-transform ${colsOpen ? 'rotate-180' : ''}`} />
               </div>
@@ -144,19 +230,37 @@ export default function KpiConfigPage() {
                   Cargue un archivo Excel con hojas E_ para ver las columnas disponibles.
                 </p>
               ) : (
-                <div className="space-y-3">
-                  {sheetTypes.map((type) => (
-                    <div key={type}>
-                      <span className="text-sm font-medium">E_{type}</span>
-                      <div className="flex flex-wrap gap-1.5 mt-1">
-                        {(availableCols.get(type) ?? []).map((col) => (
-                          <Badge key={col} variant="secondary" className="text-xs font-mono">
-                            {col}
-                          </Badge>
-                        ))}
+                <div className="space-y-4">
+                  {sheetTypes.map((type) => {
+                    const info = availableCols.get(type)!;
+                    return (
+                      <div key={type}>
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className="text-sm font-medium font-mono">E_{type}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {info.entryCount} registros en {info.contractCount} contratos
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {info.columns.map((col) => (
+                            <Badge
+                              key={col}
+                              variant="secondary"
+                              className="text-xs font-mono cursor-pointer hover:bg-primary/10 hover:text-primary transition-colors"
+                              onClick={() => openAdd(type, col)}
+                              title="Click para agregar como KPI"
+                            >
+                              <Plus className="h-2.5 w-2.5 mr-1 opacity-50" />
+                              {col}
+                            </Badge>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
+                  <p className="text-xs text-muted-foreground italic mt-2">
+                    Haga click en una columna para agregarla como KPI.
+                  </p>
                 </div>
               )}
             </CardContent>
@@ -171,7 +275,7 @@ export default function KpiConfigPage() {
             <CardTitle className="text-sm font-medium">
               KPIs Configurados ({kpis.length})
             </CardTitle>
-            <Button size="sm" onClick={openAdd}>
+            <Button size="sm" onClick={() => openAdd()}>
               <Plus className="h-4 w-4 mr-2" />
               Agregar KPI
             </Button>
@@ -186,6 +290,7 @@ export default function KpiConfigPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead>Estado</TableHead>
                   <TableHead>Hoja</TableHead>
                   <TableHead>Columna</TableHead>
                   <TableHead>Etiqueta</TableHead>
@@ -196,39 +301,51 @@ export default function KpiConfigPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {kpis.map((kpi, i) => (
-                  <TableRow key={i}>
-                    <TableCell>
-                      <Badge variant="outline" className="font-mono text-xs">
-                        E_{kpi.sheetType}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">{kpi.column}</TableCell>
-                    <TableCell>{kpi.label}</TableCell>
-                    <TableCell>
-                      <Badge variant="secondary" className="text-xs">
-                        {aggLabel(kpi.aggregation)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary" className="text-xs">
-                        {fmtLabel(kpi.format)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-center">{kpi.decimals ?? 2}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-1">
-                        <Button variant="ghost" size="sm" onClick={() => openEdit(i)}>
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleDelete(i)}
-                          className="text-destructive hover:text-destructive">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {kpis.map((kpi, i) => {
+                  const exists = kpiColumnExists(kpi);
+                  return (
+                    <TableRow key={i}>
+                      <TableCell>
+                        {exists === null ? (
+                          <Badge variant="outline" className="text-xs text-muted-foreground">-</Badge>
+                        ) : exists ? (
+                          <CheckCircle2 className="h-4 w-4 text-green-600" title="Columna encontrada en datos" />
+                        ) : (
+                          <AlertTriangle className="h-4 w-4 text-yellow-600" title="Columna no encontrada en datos cargados" />
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="font-mono text-xs">
+                          E_{kpi.sheetType}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">{kpi.column}</TableCell>
+                      <TableCell>{kpi.label}</TableCell>
+                      <TableCell>
+                        <Badge variant="secondary" className="text-xs">
+                          {aggLabel(kpi.aggregation)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary" className="text-xs">
+                          {fmtLabel(kpi.format)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-center">{kpi.decimals ?? 2}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-1">
+                          <Button variant="ghost" size="sm" onClick={() => openEdit(i)}>
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleDelete(i)}
+                            className="text-destructive hover:text-destructive">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           )}
@@ -281,7 +398,7 @@ export default function KpiConfigPage() {
                     <SelectValue placeholder="Seleccione columna..." />
                   </SelectTrigger>
                   <SelectContent>
-                    {(availableCols.get(form.sheetType) ?? []).map((c) => (
+                    {getColumnsForSheet(form.sheetType).map((c) => (
                       <SelectItem key={c} value={c}>{c}</SelectItem>
                     ))}
                   </SelectContent>

@@ -633,6 +633,15 @@ export default function ExecutiveView() {
               KPIs especializados (ej. área, USD/ha, M2) disponibles al incluir hojas <span className="font-mono font-medium">E_arrendamiento</span>, <span className="font-mono font-medium">E_obras</span>, etc. en el Excel
             </div>
           )}
+          {/* Info message when E_ data exists but no KPIs rendered */}
+          {hasAnySpecializedData && executiveKpis.length === 0 && contracts.length > 0 && (
+            <div className="p-2 border border-dashed border-yellow-300 bg-yellow-50/30 rounded-lg text-[11px] text-muted-foreground text-center">
+              Se detectaron hojas E_ pero ningún KPI configurado coincide con las columnas disponibles.{' '}
+              <a href="/kpis" className="text-primary underline hover:no-underline font-medium">
+                Verifique la configuración de KPIs
+              </a>
+            </div>
+          )}
         </div>
       )}
 
