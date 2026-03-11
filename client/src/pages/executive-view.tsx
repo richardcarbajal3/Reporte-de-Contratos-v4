@@ -16,7 +16,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { cn } from "@/lib/utils";
 import { aggregateSpecializedData, computeExecutiveKpis, computeContractKpis, EXECUTIVE_KPIS, type AggregatedSheetData, type AggregatedField, type ComputedKpi } from "@/lib/specialized-sheets-config";
 import { useKpiConfigStore, getEffectiveKpis } from "@/lib/kpi-store";
-import type { SpecializedSheetEntry } from "@/lib/excel-processor";
+
 
 export default function ExecutiveView() {
   const contracts = useAppStore(s => s.contracts);
@@ -262,15 +262,6 @@ export default function ExecutiveView() {
     return num.toLocaleString('es-PE', { minimumFractionDigits: f.decimals, maximumFractionDigits: f.decimals });
   };
 
-  // Compute aggregated specialized data for filtered contracts
-  const filteredSpecializedAggregation = useMemo((): AggregatedSheetData[] => {
-    if (filteredConsolidatedContracts.length === 0) return [];
-    const allEntries: SpecializedSheetEntry[] = filteredConsolidatedContracts.flatMap(c =>
-      c.items.flatMap(i => i.specializedData)
-    );
-    if (allEntries.length === 0) return [];
-    return aggregateSpecializedData(allEntries);
-  }, [filteredConsolidatedContracts]);
 
   // Collapsible state for dialog blocks
   const [collapsedBlocks, setCollapsedBlocks] = useState<Record<string, boolean>>({});
@@ -888,36 +879,6 @@ export default function ExecutiveView() {
              </h3>
           </div>
 
-          {/* KPI strip for selected category */}
-          {(standardKpis.length > 0 || executiveKpis.length > 0) && (
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 mb-4">
-              {standardKpis.map((kpi) => (
-                <div key={`detail-std-${kpi.label}`} className="rounded-lg border border-emerald-200 bg-emerald-50/30 p-2">
-                  <p className="text-[9px] text-muted-foreground uppercase tracking-wide">{kpi.label}</p>
-                  <p className="text-sm font-bold font-mono">
-                    {kpi.format === 'currency'
-                      ? (kpi.value as number).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: kpi.decimals })
-                      : kpi.format === 'percent'
-                      ? `${(kpi.value as number).toFixed(kpi.decimals)}%`
-                      : (kpi.value as number).toLocaleString('es-PE', { minimumFractionDigits: kpi.decimals, maximumFractionDigits: kpi.decimals })}
-                  </p>
-                </div>
-              ))}
-              {executiveKpis.map((kpi) => (
-                <div key={`detail-spec-${kpi.label}`} className="rounded-lg border border-dashed border-blue-200 bg-blue-50/20 p-2">
-                  <p className="text-[9px] text-muted-foreground uppercase tracking-wide">{kpi.label}</p>
-                  <p className="text-sm font-bold font-mono">
-                    {kpi.format === 'currency'
-                      ? (kpi.value as number).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: kpi.decimals })
-                      : kpi.format === 'percent'
-                      ? `${(kpi.value as number).toFixed(kpi.decimals)}%`
-                      : (kpi.value as number).toLocaleString('es-PE', { minimumFractionDigits: kpi.decimals, maximumFractionDigits: kpi.decimals })}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
-
           <Card>
             <CardContent className="p-0">
               <div className="max-h-[500px] overflow-auto">
@@ -1033,32 +994,6 @@ export default function ExecutiveView() {
             </CardContent>
           </Card>
 
-          {/* Aggregated Specialized Data for Filtered Group */}
-          {filteredSpecializedAggregation.length > 0 && (
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-              {filteredSpecializedAggregation.map((sheet) => (
-                <Card key={sheet.sheetType} className="border-dashed border-blue-300 bg-blue-50/30">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <Activity className="h-4 w-4 text-blue-600" />
-                      Datos Adicionales: {sheet.label}
-                    </CardTitle>
-                    <CardDescription className="text-xs">Agregado del grupo filtrado ({filteredConsolidatedContracts.length} contratos)</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                      {sheet.fields.map((f) => (
-                        <div key={f.label} className="text-center p-2 rounded-md bg-background border">
-                          <div className="text-[10px] text-muted-foreground uppercase tracking-wide">{f.label}</div>
-                          <div className="text-sm font-mono font-bold mt-1">{fmtField(f)}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
         </div>
       )}
 
