@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { useKpiConfigStore, getEffectiveKpis } from '@/lib/kpi-store';
 import { useAvailableColumns } from '@/lib/use-available-columns';
 import { EXECUTIVE_KPIS, CONTRACT_FIELDS, stripAccents, type ExecutiveKpiDef, type AggregationType } from '@/lib/specialized-sheets-config';
+import type { SpecializedSheetLog } from '@/lib/excel-processor';
 import { useAppStore } from '@/store';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -54,6 +55,7 @@ export default function KpiConfigPage() {
   const kpis = getEffectiveKpis(store);
   const availableCols = useAvailableColumns();
   const consolidated = useAppStore((s) => s.consolidated);
+  const sheetLogs = useAppStore((s) => s.specializedSheetLogs);
   const hasData = consolidated.length > 0;
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -199,34 +201,46 @@ export default function KpiConfigPage() {
       </div>
 
       {/* Diagnostics panel */}
-      {hasData && diagnostics && (
-        <Card className={diagnostics.withE > 0 ? 'border-green-200 bg-green-50/30' : 'border-muted bg-muted/20'}>
-          <CardContent className="py-3">
-            <div className="flex items-center gap-2 text-sm">
-              {diagnostics.withE > 0 ? (
-                <>
-                  <Link2 className="h-4 w-4 text-green-600" />
-                  <span>
-                    <strong>{diagnostics.withE}</strong> de {diagnostics.total} contratos tienen datos E_ vinculados
-                    {sheetTypes.length > 0 && (
-                      <span className="text-muted-foreground">
-                        {' '}({sheetTypes.map(t => {
-                          const info = availableCols.get(t)!;
-                          return `E_${t}: ${info.entryCount} registros en ${info.contractCount} contratos`;
-                        }).join(', ')})
-                      </span>
+      {hasData && (
+        <Card className={diagnostics && diagnostics.withE > 0 ? 'border-green-200 bg-green-50/30' : 'border-yellow-200 bg-yellow-50/30'}>
+          <CardContent className="py-3 space-y-2">
+            {diagnostics && diagnostics.withE > 0 ? (
+              <div className="flex items-center gap-2 text-sm">
+                <Link2 className="h-4 w-4 text-green-600" />
+                <span>
+                  <strong>{diagnostics.withE}</strong> de {diagnostics.total} contratos tienen datos E_ vinculados
+                </span>
+              </div>
+            ) : sheetLogs.length > 0 ? (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                  <span className="font-medium">Hojas E_ detectadas pero vinculación falló:</span>
+                </div>
+                {sheetLogs.map((log) => (
+                  <div key={log.sheetName} className="text-xs bg-white/50 p-2 rounded border space-y-1">
+                    <p><strong>{log.sheetName}</strong>: {log.rowCount} filas, <span className="text-green-600">{log.matchCount} vinculadas</span>, <span className="text-red-600">{log.missCount} sin match</span></p>
+                    <p className="text-muted-foreground">Columnas: <span className="font-mono">{log.detectedColumns.join(', ')}</span></p>
+                    {log.sampleEIds.length > 0 && (
+                      <p className="text-muted-foreground">IDs en E_: <span className="font-mono">{log.sampleEIds.join(', ')}</span></p>
                     )}
-                  </span>
-                </>
-              ) : (
-                <>
-                  <Database className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-muted-foreground">
-                    No se detectaron hojas E_ en el Excel. Use KPIs de tipo <strong>"Datos del Contrato"</strong> que siempre funcionan.
-                  </span>
-                </>
-              )}
-            </div>
+                    {log.sampleContractMapKeys.length > 0 && (
+                      <p className="text-muted-foreground">IDs en 1Contratos: <span className="font-mono">{log.sampleContractMapKeys.join(', ')}</span></p>
+                    )}
+                    {log.matchCount === 0 && (
+                      <p className="text-red-600 font-medium">Los IDs no coinciden. Compare los formatos arriba.</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-sm">
+                <Database className="h-4 w-4 text-muted-foreground" />
+                <span className="text-muted-foreground">
+                  No se detectaron hojas E_ en el Excel. Use KPIs de tipo <strong>"Datos del Contrato"</strong> que siempre funcionan.
+                </span>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

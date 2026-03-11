@@ -267,10 +267,21 @@ export interface ConsolidatedContract {
   items: ContractData[]; // The addendums belonging to this contract
 }
 
+export interface SpecializedSheetLog {
+  sheetName: string;
+  rowCount: number;
+  matchCount: number;
+  missCount: number;
+  detectedColumns: string[];
+  sampleEIds: string[];
+  sampleContractMapKeys: string[];
+}
+
 export interface ProcessingResult {
   contracts: ContractData[];
   consolidated: ConsolidatedContract[];
   errors: string[];
+  specializedSheetLogs: SpecializedSheetLog[];
 }
 
 const NORMALIZE_HEADERS = (row: any) => {
@@ -310,7 +321,8 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
         const result: ProcessingResult = {
           contracts: [],
           consolidated: [],
-          errors: []
+          errors: [],
+          specializedSheetLogs: []
         };
 
         // Helper to parse numbers safely
@@ -623,12 +635,19 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
         // These are discovered from the RAW workbook since normalizeWorkbook discards unmapped sheets.
         const eSheetNames = rawWorkbook.SheetNames.filter(name => /^E_/i.test(name));
 
-        // Build a lookup of contractId → keys for flexible matching
+        // Build lookups for flexible matching
         const contractIdToKeys = new Map<string, string[]>();
+        // Also build a normalized lookup: uppercase trimmed contractId → keys
+        const normalizedIdToKeys = new Map<string, string[]>();
         contractsMap.forEach((c, key) => {
           const existing = contractIdToKeys.get(c.contractId) || [];
           existing.push(key);
           contractIdToKeys.set(c.contractId, existing);
+
+          const norm = c.contractId.trim().toUpperCase();
+          const normExisting = normalizedIdToKeys.get(norm) || [];
+          normExisting.push(key);
+          normalizedIdToKeys.set(norm, normExisting);
         });
 
         for (const eSheetName of eSheetNames) {
@@ -636,38 +655,32 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
           const sheetLabel = sheetType.charAt(0).toUpperCase() + sheetType.slice(1);
 
           const rawSheet = rawWorkbook.Sheets[eSheetName];
-          // Reuse the same robust header detection as normal sheets, with CONTRATO+ADENDA as anchors
+          // Try anchor-based header detection, then fall back to density heuristic
           const eHeaderRow = detectHeaderRow(rawSheet, undefined, 30, ['CONTRATO', 'ADENDA']);
           const eRows = extractSheetData(rawSheet, eHeaderRow);
 
-          console.log(`[E_ Sheet] "${eSheetName}": ${eRows.length} filas, header en fila ${eHeaderRow + 1}`);
+          // Collect columns for logging
+          let detectedColumns: string[] = [];
           if (eRows.length > 0) {
             const sampleRow = NORMALIZE_HEADERS(eRows[0]);
-            const upperKeys = Object.keys(sampleRow).filter(k => k === k.toUpperCase());
-            console.log(`[E_ Sheet] "${eSheetName}" columnas (${upperKeys.length}):`, upperKeys);
-
-            // Log contract ID detection for first row
-            let testId: any;
-            for (const [key, value] of Object.entries(sampleRow)) {
-              const upper = key.trim().toUpperCase().replace(/\s+/g, ' ');
-              if (/^N.?\s?CONTRATO$/.test(upper)) { testId = value; break; }
-            }
-            console.log(`[E_ Sheet] "${eSheetName}" primer contrato ID:`, testId ?? 'NO ENCONTRADO');
+            detectedColumns = Object.keys(sampleRow);
+            console.log(`[E_ Sheet] "${eSheetName}": ${eRows.length} filas, header en fila ${eHeaderRow + 1}, columnas:`, detectedColumns);
           }
 
           let matchCount = 0;
           let missCount = 0;
+          const sampleEIds: string[] = [];
 
-          eRows.forEach((row: any) => {
+          eRows.forEach((row: any, rowIdx: number) => {
             const r = NORMALIZE_HEADERS(row);
-            // Find contract ID using regex — handles N°, Nº, N , NO, etc.
-            // The ° (U+00B0) vs º (U+00BA) mismatch breaks exact string matching
+
+            // ---- Extract contract ID from E_ row ----
             let rawContractId: any = undefined;
             let adendaVal: any = undefined;
 
+            // Strategy 1: N° CONTRATO / Nº CONTRATO / etc. (regex for Unicode variants)
             for (const [key, value] of Object.entries(r)) {
               const upper = key.trim().toUpperCase().replace(/\s+/g, ' ');
-              // Match "N° CONTRATO", "Nº CONTRATO", "N CONTRATO", "NO CONTRATO"
               if (!rawContractId && /^N.?\s?CONTRATO$/.test(upper)) {
                 rawContractId = value;
               }
@@ -676,7 +689,7 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
               }
             }
 
-            // Fallback 1: look for standalone "CONTRATO" column (not "CONTRATO + ADENDA")
+            // Strategy 2: standalone "CONTRATO" column
             if (!rawContractId) {
               for (const [key, value] of Object.entries(r)) {
                 const upper = key.trim().toUpperCase().replace(/\s+/g, ' ');
@@ -687,7 +700,7 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
               }
             }
 
-            // Fallback 2: parse "CONTRATO + ADENDA" combined column (e.g., "SGR-022-0")
+            // Strategy 3: "CONTRATO + ADENDA" combined column
             if (!rawContractId) {
               for (const [key, value] of Object.entries(r)) {
                 const upper = key.trim().toUpperCase().replace(/\s+/g, ' ');
@@ -706,20 +719,37 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
                 }
               }
             }
-            if (!rawContractId) return;
-            const contractId = String(rawContractId).trim();
 
-            // Get ADENDA from the row for precise matching
+            // Strategy 4: any column containing "CONTRATO" (last resort for ID detection)
+            if (!rawContractId) {
+              for (const [key, value] of Object.entries(r)) {
+                const upper = key.trim().toUpperCase().replace(/\s+/g, ' ');
+                if (upper.includes('CONTRATO') && value != null && String(value).trim() !== '') {
+                  rawContractId = value;
+                  break;
+                }
+              }
+            }
+
+            if (!rawContractId) {
+              // Log first few unmatched rows for debugging
+              if (rowIdx < 3) {
+                console.warn(`[E_ Sheet] "${eSheetName}" fila ${rowIdx}: NO se encontró ID de contrato. Keys:`, Object.keys(r));
+              }
+              missCount++;
+              return;
+            }
+
+            const contractId = String(rawContractId).trim();
+            if (sampleEIds.length < 5) sampleEIds.push(contractId);
+
             const adendaStr = adendaVal !== undefined && adendaVal !== null ? String(adendaVal).trim() : '0';
 
-            // Build data object from all non-identifier columns
-            // Strip accents from keys so "ÁREA (HA)" → "AREA (HA)" matching the config
+            // ---- Build data object from non-identifier columns ----
             const data: Record<string, any> = {};
             const seenKeys = new Set<string>();
-
             for (const [key, value] of Object.entries(r)) {
               const upperKey = stripAccents(key.trim().toUpperCase().replace(/\s+/g, ' '));
-              // Skip identifier columns using regex (avoids Unicode ° mismatch)
               if (/^N.?\s?CONTRATO$/.test(upperKey)) continue;
               if (upperKey === 'CONTRATO' || upperKey === 'ADENDA') continue;
               if (upperKey.includes('CONTRATO +') || upperKey.includes('CONTRATO+')) continue;
@@ -731,57 +761,85 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
               }
             }
 
-            // Try precise match: contractId + adenda from E_ sheet row
+            // ---- Match to contracts with multiple fallbacks ----
+            let matched = false;
+
+            // Match 1: exact key contractId-adenda
             const specificKey = `${contractId}-${adendaStr}`;
             const specificContract = contractsMap.get(specificKey);
             if (specificContract) {
               specificContract.specializedData.push({ sheetType, sheetLabel, data });
-              matchCount++;
-            } else {
-              // Fallback 1: try addendum 0
+              matched = true;
+            }
+
+            // Match 2: try addendum 0
+            if (!matched) {
               const primaryKey = `${contractId}-0`;
               const primaryContract = contractsMap.get(primaryKey);
               if (primaryContract) {
                 primaryContract.specializedData.push({ sheetType, sheetLabel, data });
-                matchCount++;
-              } else {
-                // Fallback 2: find any addendum for this contract by matching contractId
-                let found = false;
-                const keys = contractIdToKeys.get(contractId);
-                if (keys) {
-                  const contract = contractsMap.get(keys[0]);
-                  if (contract) {
-                    contract.specializedData.push({ sheetType, sheetLabel, data });
-                    found = true;
-                    matchCount++;
-                  }
-                }
-                if (!found) {
-                  // Fallback 3: loose matching with trim
-                  contractsMap.forEach((c) => {
-                    if (!found && c.contractId.trim() === contractId) {
-                      c.specializedData.push({ sheetType, sheetLabel, data });
-                      found = true;
-                      matchCount++;
-                    }
-                  });
-                }
-                if (!found) missCount++;
+                matched = true;
               }
             }
+
+            // Match 3: lookup by contractId in contractIdToKeys
+            if (!matched) {
+              const keys = contractIdToKeys.get(contractId);
+              if (keys) {
+                const contract = contractsMap.get(keys[0]);
+                if (contract) {
+                  contract.specializedData.push({ sheetType, sheetLabel, data });
+                  matched = true;
+                }
+              }
+            }
+
+            // Match 4: normalized uppercase comparison
+            if (!matched) {
+              const normId = contractId.toUpperCase();
+              const keys = normalizedIdToKeys.get(normId);
+              if (keys) {
+                const contract = contractsMap.get(keys[0]);
+                if (contract) {
+                  contract.specializedData.push({ sheetType, sheetLabel, data });
+                  matched = true;
+                }
+              }
+            }
+
+            // Match 5: substring/contains match (E_ ID contains contractMap ID or vice versa)
+            if (!matched) {
+              const normId = contractId.toUpperCase().trim();
+              for (const [mapKey, contract] of contractsMap) {
+                const mapId = contract.contractId.toUpperCase().trim();
+                if (normId.includes(mapId) || mapId.includes(normId)) {
+                  contract.specializedData.push({ sheetType, sheetLabel, data });
+                  matched = true;
+                  break;
+                }
+              }
+            }
+
+            if (matched) matchCount++;
+            else missCount++;
           });
 
           console.log(`[E_ Sheet] "${eSheetName}": ${matchCount} vinculadas, ${missCount} sin match de ${eRows.length} filas`);
+          const sampleMapKeys = Array.from(contractsMap.keys()).slice(0, 5);
           if (matchCount === 0 && eRows.length > 0) {
-            const sampleIds = eRows.slice(0, 3).map(row => {
-              const r2 = NORMALIZE_HEADERS(row);
-              for (const [k, v] of Object.entries(r2)) {
-                if (/^N.?\s?CONTRATO$/.test(k.trim().toUpperCase().replace(/\s+/g, ' '))) return v;
-              }
-              return '?';
-            });
-            console.warn(`[E_ Sheet] WARNING: 0 matches! E_ IDs:`, sampleIds, `contractsMap keys:`, Array.from(contractsMap.keys()).slice(0, 5));
+            console.warn(`[E_ Sheet] WARNING: 0 matches! E_ IDs:`, sampleEIds, `contractsMap keys:`, sampleMapKeys);
           }
+
+          // Save log for UI diagnostics
+          result.specializedSheetLogs.push({
+            sheetName: eSheetName,
+            rowCount: eRows.length,
+            matchCount,
+            missCount,
+            detectedColumns,
+            sampleEIds,
+            sampleContractMapKeys: sampleMapKeys,
+          });
         }
 
         // 4. Calculate Balances

@@ -27,7 +27,7 @@ export function FileUpload() {
           description: result.errors.join('\n'),
         });
       } else {
-        setData(result.contracts, result.consolidated);
+        setData(result.contracts, result.consolidated, result.specializedSheetLogs);
         toast({
           title: "Importación exitosa",
           description: `Se procesaron ${result.contracts.length} registros.`,
