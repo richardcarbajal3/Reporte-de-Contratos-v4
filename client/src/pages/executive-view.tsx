@@ -14,7 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
-import { aggregateSpecializedData, computeExecutiveKpis, type AggregatedSheetData, type AggregatedField, type ComputedKpi } from "@/lib/specialized-sheets-config";
+import { aggregateSpecializedData, computeExecutiveKpis, computeStandardKpis, type AggregatedSheetData, type AggregatedField, type ComputedKpi } from "@/lib/specialized-sheets-config";
 import type { SpecializedSheetEntry } from "@/lib/excel-processor";
 
 export default function ExecutiveView() {
@@ -151,6 +151,11 @@ export default function ExecutiveView() {
     if (allEntries.length === 0) return [];
     const result = computeExecutiveKpis(allEntries);
     return result;
+  }, [kpiSource]);
+
+  // Standard KPIs from contract fields (always available)
+  const standardKpis = useMemo((): ComputedKpi[] => {
+    return computeStandardKpis(kpiSource);
   }, [kpiSource]);
 
   // Check if any contract has specialized data (for showing info message)
@@ -577,30 +582,57 @@ export default function ExecutiveView() {
         </Card>
       </div>
 
-      {/* Executive KPIs from specialized sheets */}
-      {executiveKpis.length > 0 ? (
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
-          {executiveKpis.map((kpi) => (
-            <Card key={kpi.label} className="border-dashed border-blue-200 bg-blue-50/20">
-              <CardContent className="p-3">
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{kpi.label}</p>
-                <p className="text-lg font-bold font-mono mt-1">
-                  {kpi.format === 'currency'
-                    ? (kpi.value as number).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: kpi.decimals })
-                    : kpi.format === 'percent'
-                    ? `${(kpi.value as number).toFixed(kpi.decimals)}%`
-                    : (kpi.value as number).toLocaleString('es-PE', { minimumFractionDigits: kpi.decimals, maximumFractionDigits: kpi.decimals })}
-                </p>
-              </CardContent>
-            </Card>
-          ))}
+      {/* KPI Cards Section: Standard (always) + Specialized (from E_ sheets) */}
+      {(standardKpis.length > 0 || executiveKpis.length > 0) && (
+        <div className="mb-6 space-y-3">
+          {/* Standard KPIs - always visible */}
+          {standardKpis.length > 0 && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {standardKpis.map((kpi) => (
+                <Card key={kpi.label} className="border border-emerald-200 bg-emerald-50/30">
+                  <CardContent className="p-3">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{kpi.label}</p>
+                    <p className="text-lg font-bold font-mono mt-1">
+                      {kpi.format === 'currency'
+                        ? (kpi.value as number).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: kpi.decimals })
+                        : kpi.format === 'percent'
+                        ? `${(kpi.value as number).toFixed(kpi.decimals)}%`
+                        : (kpi.value as number).toLocaleString('es-PE', { minimumFractionDigits: kpi.decimals, maximumFractionDigits: kpi.decimals })}
+                    </p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {/* Specialized KPIs from E_ sheets */}
+          {executiveKpis.length > 0 && (
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+              {executiveKpis.map((kpi) => (
+                <Card key={kpi.label} className="border-dashed border-blue-200 bg-blue-50/20">
+                  <CardContent className="p-3">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{kpi.label}</p>
+                    <p className="text-lg font-bold font-mono mt-1">
+                      {kpi.format === 'currency'
+                        ? (kpi.value as number).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: kpi.decimals })
+                        : kpi.format === 'percent'
+                        ? `${(kpi.value as number).toFixed(kpi.decimals)}%`
+                        : (kpi.value as number).toLocaleString('es-PE', { minimumFractionDigits: kpi.decimals, maximumFractionDigits: kpi.decimals })}
+                    </p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {/* Info message when no E_ sheets exist */}
+          {!hasAnySpecializedData && contracts.length > 0 && (
+            <div className="p-2 border border-dashed border-muted-foreground/20 rounded-lg text-[11px] text-muted-foreground text-center">
+              KPIs especializados (ej. área, USD/ha, M2) disponibles al incluir hojas <span className="font-mono font-medium">E_arrendamiento</span>, <span className="font-mono font-medium">E_obras</span>, etc. en el Excel
+            </div>
+          )}
         </div>
-      ) : !hasAnySpecializedData && contracts.length > 0 ? (
-        <div className="mb-6 p-3 border border-dashed border-muted-foreground/30 rounded-lg text-xs text-muted-foreground text-center">
-          KPIs adicionales disponibles si el Excel incluye hojas <span className="font-mono font-medium">E_arrendamiento</span>, <span className="font-mono font-medium">E_obras</span>, etc.
-          Configurar en <span className="font-mono">specialized-sheets-config.ts</span>
-        </div>
-      ) : null}
+      )}
 
       {/* Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
@@ -866,7 +898,37 @@ export default function ExecutiveView() {
                Contratos Padre en: <span className="text-primary">{selectedCategories.length > 3 ? `${selectedCategories.length} categorías seleccionadas` : selectedCategories.join(', ')}</span>
              </h3>
           </div>
-          
+
+          {/* KPI strip for selected category */}
+          {(standardKpis.length > 0 || executiveKpis.length > 0) && (
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 mb-4">
+              {standardKpis.map((kpi) => (
+                <div key={`detail-std-${kpi.label}`} className="rounded-lg border border-emerald-200 bg-emerald-50/30 p-2">
+                  <p className="text-[9px] text-muted-foreground uppercase tracking-wide">{kpi.label}</p>
+                  <p className="text-sm font-bold font-mono">
+                    {kpi.format === 'currency'
+                      ? (kpi.value as number).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: kpi.decimals })
+                      : kpi.format === 'percent'
+                      ? `${(kpi.value as number).toFixed(kpi.decimals)}%`
+                      : (kpi.value as number).toLocaleString('es-PE', { minimumFractionDigits: kpi.decimals, maximumFractionDigits: kpi.decimals })}
+                  </p>
+                </div>
+              ))}
+              {executiveKpis.map((kpi) => (
+                <div key={`detail-spec-${kpi.label}`} className="rounded-lg border border-dashed border-blue-200 bg-blue-50/20 p-2">
+                  <p className="text-[9px] text-muted-foreground uppercase tracking-wide">{kpi.label}</p>
+                  <p className="text-sm font-bold font-mono">
+                    {kpi.format === 'currency'
+                      ? (kpi.value as number).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: kpi.decimals })
+                      : kpi.format === 'percent'
+                      ? `${(kpi.value as number).toFixed(kpi.decimals)}%`
+                      : (kpi.value as number).toLocaleString('es-PE', { minimumFractionDigits: kpi.decimals, maximumFractionDigits: kpi.decimals })}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+
           <Card>
             <CardContent className="p-0">
               <div className="max-h-[500px] overflow-auto">

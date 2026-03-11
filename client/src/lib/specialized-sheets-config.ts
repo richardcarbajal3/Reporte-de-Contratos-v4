@@ -12,6 +12,8 @@
 //   count - Count of non-empty values
 //   first - First non-empty value (useful for text fields)
 
+import type { ConsolidatedContract } from './excel-processor';
+
 /** Strip accents/diacritics: "ÁREA" → "AREA", "Descripción" → "Descripcion" */
 const stripAccents = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
@@ -306,6 +308,75 @@ export function computeExecutiveKpis(
     });
   }
   return results;
+}
+
+// ============================================================
+// Standard KPI Definitions (computed from contract fields)
+// ============================================================
+// These KPIs are always available regardless of E_ sheets.
+// They react to all active filters in the executive view.
+
+export interface StandardKpiDef {
+  id: string;
+  label: string;
+  compute: (contracts: ConsolidatedContract[]) => number;
+  format: 'number' | 'currency' | 'percent';
+  decimals?: number;
+}
+
+export const STANDARD_KPIS: StandardKpiDef[] = [
+  {
+    id: 'avg-contract-value',
+    label: 'Valor Promedio',
+    compute: (c) => c.length === 0 ? 0 : c.reduce((s, x) => s + x.totalAmount, 0) / c.length,
+    format: 'currency',
+    decimals: 0,
+  },
+  {
+    id: 'percent-paid',
+    label: '% Pagado Global',
+    compute: (c) => {
+      const total = c.reduce((s, x) => s + x.totalAmount, 0);
+      const paid = c.reduce((s, x) => s + x.totalPaid, 0);
+      return total > 0 ? (paid / total) * 100 : 0;
+    },
+    format: 'percent',
+    decimals: 1,
+  },
+  {
+    id: 'avg-progress',
+    label: 'Avance Promedio',
+    compute: (c) => {
+      if (c.length === 0) return 0;
+      return c.reduce((s, x) => s + x.progressPercent, 0) / c.length;
+    },
+    format: 'percent',
+    decimals: 1,
+  },
+  {
+    id: 'total-balance',
+    label: 'Saldo Total',
+    compute: (c) => c.reduce((s, x) => s + x.totalBalance, 0),
+    format: 'currency',
+    decimals: 0,
+  },
+];
+
+/**
+ * Compute standard KPIs from consolidated contracts.
+ * These are always available (no E_ sheets needed).
+ */
+export function computeStandardKpis(
+  contracts: ConsolidatedContract[],
+  defs: StandardKpiDef[] = STANDARD_KPIS
+): ComputedKpi[] {
+  if (contracts.length === 0) return [];
+  return defs.map(def => ({
+    label: def.label,
+    value: def.compute(contracts),
+    format: def.format,
+    decimals: def.decimals ?? 2,
+  }));
 }
 
 function defaultParseNumber(val: any): number {
