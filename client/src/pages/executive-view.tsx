@@ -14,7 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
-import { aggregateSpecializedData, computeExecutiveKpis, computeContractKpis, computeStandardKpis, EXECUTIVE_KPIS, type AggregatedSheetData, type AggregatedField, type ComputedKpi } from "@/lib/specialized-sheets-config";
+import { aggregateSpecializedData, computeExecutiveKpis, computeContractKpis, EXECUTIVE_KPIS, type AggregatedSheetData, type AggregatedField, type ComputedKpi } from "@/lib/specialized-sheets-config";
 import { useKpiConfigStore, getEffectiveKpis } from "@/lib/kpi-store";
 import type { SpecializedSheetEntry } from "@/lib/excel-processor";
 
@@ -157,10 +157,6 @@ export default function ExecutiveView() {
     return [...contractKpis, ...specializedKpis];
   }, [kpiSource, configuredKpis]);
 
-  // Standard KPIs from contract fields (always available)
-  const standardKpis = useMemo((): ComputedKpi[] => {
-    return computeStandardKpis(kpiSource);
-  }, [kpiSource]);
 
   // Check if any contract has specialized data (for showing info message)
   const hasAnySpecializedData = useMemo(() => {
@@ -586,30 +582,10 @@ export default function ExecutiveView() {
         </Card>
       </div>
 
-      {/* KPI Cards Section: Standard (always) + Specialized (from E_ sheets) */}
-      {(standardKpis.length > 0 || executiveKpis.length > 0) && (
+      {/* KPI Cards Section: only manually configured KPIs */}
+      {executiveKpis.length > 0 && (
         <div className="mb-6 space-y-3">
-          {/* Standard KPIs - always visible */}
-          {standardKpis.length > 0 && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {standardKpis.map((kpi) => (
-                <Card key={kpi.label} className="border border-emerald-200 bg-emerald-50/30">
-                  <CardContent className="p-3">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{kpi.label}</p>
-                    <p className="text-lg font-bold font-mono mt-1">
-                      {kpi.format === 'currency'
-                        ? (kpi.value as number).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: kpi.decimals })
-                        : kpi.format === 'percent'
-                        ? `${(kpi.value as number).toFixed(kpi.decimals)}%`
-                        : (kpi.value as number).toLocaleString('es-PE', { minimumFractionDigits: kpi.decimals, maximumFractionDigits: kpi.decimals })}
-                    </p>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-
-          {/* Specialized KPIs from E_ sheets */}
+          {/* Configured KPIs from contract fields and E_ sheets */}
           {executiveKpis.length > 0 && (
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
               {executiveKpis.map((kpi) => (
