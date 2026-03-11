@@ -233,19 +233,37 @@ function computeTextAggregation(agg: AggregationType, values: any[]): string {
 // To add new KPIs, simply add entries to EXECUTIVE_KPIS array.
 
 export interface ExecutiveKpiDef {
-  sheetType: string;           // which E_ sheet (lowercase, e.g. 'arrendamiento')
-  column: string;              // column to aggregate (UPPERCASE)
+  source?: 'specialized' | 'contract'; // default 'specialized' for backward compat
+  sheetType: string;           // for specialized: which E_ sheet; for contract: ignored
+  column: string;              // for specialized: column in E_ sheet; for contract: field key (e.g. 'totalAmount')
   label: string;               // display label
   aggregation: AggregationType;
   format: 'number' | 'currency' | 'percent' | 'text';
   decimals?: number;
 }
 
+/** Available contract fields for source='contract' KPIs */
+export const CONTRACT_FIELDS: { key: string; label: string; defaultFormat: ExecutiveKpiDef['format'] }[] = [
+  { key: 'totalAmount', label: 'Monto Total', defaultFormat: 'currency' },
+  { key: 'totalPaid', label: 'Total Pagado', defaultFormat: 'currency' },
+  { key: 'totalBalance', label: 'Saldo', defaultFormat: 'currency' },
+  { key: 'totalExecuted', label: 'Ejecutado', defaultFormat: 'currency' },
+  { key: 'totalRetention', label: 'Retención', defaultFormat: 'currency' },
+  { key: 'totalGuarantees', label: 'Garantías', defaultFormat: 'currency' },
+  { key: 'progressPercent', label: 'Avance %', defaultFormat: 'percent' },
+];
+
 export const EXECUTIVE_KPIS: ExecutiveKpiDef[] = [
-  { sheetType: 'arrendamiento', column: 'PAGO ANUAL (US$)', label: 'Pago Anual Arrend.', aggregation: 'sum', format: 'currency' },
-  { sheetType: 'arrendamiento', column: 'AREA (HA)',        label: 'Área Total (Ha)',    aggregation: 'sum', format: 'number', decimals: 2 },
-  { sheetType: 'arrendamiento', column: 'USD/HA',           label: 'Prom. USD/ha',       aggregation: 'avg', format: 'currency' },
-  { sheetType: 'obras',         column: 'M2',               label: 'M2 Total Obras',     aggregation: 'sum', format: 'number', decimals: 2 },
+  // Contract-source KPIs (always work)
+  { source: 'contract', sheetType: '', column: 'totalAmount',    label: 'Monto Total',     aggregation: 'sum', format: 'currency', decimals: 0 },
+  { source: 'contract', sheetType: '', column: 'totalPaid',      label: 'Total Pagado',    aggregation: 'sum', format: 'currency', decimals: 0 },
+  { source: 'contract', sheetType: '', column: 'totalRetention', label: 'Retención Total', aggregation: 'sum', format: 'currency', decimals: 0 },
+  { source: 'contract', sheetType: '', column: 'totalGuarantees',label: 'Garantías Total', aggregation: 'sum', format: 'currency', decimals: 0 },
+  // Specialized-source KPIs (need E_ sheets)
+  { source: 'specialized', sheetType: 'arrendamiento', column: 'PAGO ANUAL (US$)', label: 'Pago Anual Arrend.', aggregation: 'sum', format: 'currency' },
+  { source: 'specialized', sheetType: 'arrendamiento', column: 'AREA (HA)',        label: 'Área Total (Ha)',    aggregation: 'sum', format: 'number', decimals: 2 },
+  { source: 'specialized', sheetType: 'arrendamiento', column: 'USD/HA',           label: 'Prom. USD/ha',       aggregation: 'avg', format: 'currency' },
+  { source: 'specialized', sheetType: 'obras',         column: 'M2',               label: 'M2 Total Obras',     aggregation: 'sum', format: 'number', decimals: 2 },
 ];
 
 export interface ComputedKpi {
@@ -377,6 +395,35 @@ export function computeStandardKpis(
     format: def.format,
     decimals: def.decimals ?? 2,
   }));
+}
+
+/**
+ * Compute KPIs from contract fields (source='contract').
+ * Works with any ConsolidatedContract numeric field.
+ */
+export function computeContractKpis(
+  contracts: ConsolidatedContract[],
+  kpiDefs: ExecutiveKpiDef[]
+): ComputedKpi[] {
+  const contractDefs = kpiDefs.filter(d => d.source === 'contract');
+  if (contractDefs.length === 0 || contracts.length === 0) return [];
+
+  const results: ComputedKpi[] = [];
+  for (const def of contractDefs) {
+    const values = contracts
+      .map(c => (c as any)[def.column])
+      .filter(v => typeof v === 'number' && !isNaN(v));
+    if (values.length === 0) continue;
+
+    const result = computeNumericAggregation(def.aggregation, values);
+    results.push({
+      label: def.label,
+      value: result,
+      format: def.format,
+      decimals: def.decimals ?? 2,
+    });
+  }
+  return results;
 }
 
 function defaultParseNumber(val: any): number {

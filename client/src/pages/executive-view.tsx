@@ -14,7 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
-import { aggregateSpecializedData, computeExecutiveKpis, computeStandardKpis, EXECUTIVE_KPIS, type AggregatedSheetData, type AggregatedField, type ComputedKpi } from "@/lib/specialized-sheets-config";
+import { aggregateSpecializedData, computeExecutiveKpis, computeContractKpis, computeStandardKpis, EXECUTIVE_KPIS, type AggregatedSheetData, type AggregatedField, type ComputedKpi } from "@/lib/specialized-sheets-config";
 import { useKpiConfigStore, getEffectiveKpis } from "@/lib/kpi-store";
 import type { SpecializedSheetEntry } from "@/lib/excel-processor";
 
@@ -147,12 +147,14 @@ export default function ExecutiveView() {
   // Suma de Retención (Pagos) + Garantías (Cartas Fianza)
   const totalRetentionAndGuarantees = kpiSource.reduce((acc, c) => acc + c.totalRetention + c.totalGuarantees, 0);
 
-  // Executive KPIs from specialized sheets (E_arrendamiento, E_obras, etc.)
+  // Executive KPIs: contract-source + specialized-source (E_ sheets)
   const executiveKpis = useMemo((): ComputedKpi[] => {
+    // Contract-source KPIs (always work if data exists)
+    const contractKpis = computeContractKpis(kpiSource, configuredKpis);
+    // Specialized-source KPIs (from E_ sheets)
     const allEntries = kpiSource.flatMap(c => c.items.flatMap(i => i.specializedData));
-    if (allEntries.length === 0) return [];
-    const result = computeExecutiveKpis(allEntries, configuredKpis);
-    return result;
+    const specializedKpis = allEntries.length > 0 ? computeExecutiveKpis(allEntries, configuredKpis) : [];
+    return [...contractKpis, ...specializedKpis];
   }, [kpiSource, configuredKpis]);
 
   // Standard KPIs from contract fields (always available)
