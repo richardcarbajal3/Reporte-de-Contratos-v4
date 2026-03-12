@@ -814,8 +814,8 @@ export default function ExecutiveView() {
 
       {/* KPI Cards */}
       {selectedCategories.length > 0 && (
-        <div className="mb-2 flex items-center gap-2 text-xs text-primary font-medium">
-          <Activity className="h-3.5 w-3.5" />
+        <div className="mb-2 flex items-center gap-2 text-xs print:text-lg text-primary font-medium print:font-bold">
+          <Activity className="h-3.5 w-3.5 print:h-5 print:w-5" />
           Mostrando datos de: {selectedCategories.length > 3 ? `${selectedCategories.length} categorías` : selectedCategories.join(', ')}
           <span className="text-muted-foreground">({kpiSource.length} contratos)</span>
         </div>
