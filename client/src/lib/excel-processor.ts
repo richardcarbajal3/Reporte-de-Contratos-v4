@@ -501,11 +501,24 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
                 }
               }
               const addendumId = r['ADENDA'];
-              
-              if (contractId && addendumId !== undefined) {
-                 const key = `${contractId}-${addendumId}`;
-                 const contract = contractsMap.get(key);
-                 
+
+              if (contractId) {
+                 // Try exact match first (CONTRATO + ADENDA)
+                 let contract: ContractData | undefined;
+                 if (addendumId !== undefined) {
+                   contract = contractsMap.get(`${contractId}-${addendumId}`);
+                 }
+                 // Fallback: try parent contract (adenda 0)
+                 if (!contract) {
+                   contract = contractsMap.get(`${contractId}-0`);
+                 }
+                 // Last fallback: any adenda for this contract
+                 if (!contract) {
+                   for (const [k, v] of contractsMap) {
+                     if (k.startsWith(`${contractId}-`)) { contract = v; break; }
+                   }
+                 }
+
                  if (contract) {
                    // Calculate main value to aggregate
                    let val = 0;
