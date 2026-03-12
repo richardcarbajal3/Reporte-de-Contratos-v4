@@ -20,7 +20,7 @@ const SHEET_NAME_ALIASES: Record<string, string[]> = {
 const SHEET_ANCHOR_HEADERS: Record<string, string[]> = {
   contratos:        ['CONTRATO', 'ADENDA', 'MONTO'],
   pagos:            ['CONTRATO', 'ADENDA', 'VALOR'],
-  provisiones:      ['CONTRATO', 'ADENDA', 'PROVISIO'],
+  provisiones:      ['CONTRATO_', 'EMPRESA_', 'SALDO DE PROVISIONES'],
   programacion:     ['CONTRATO', 'ADENDA'],
   garantias:        ['CONTRATO', 'CARTA FIANZA'],
   custodia:         ['CONTRATO', 'ADENDA'],
@@ -488,16 +488,31 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
         secondarySheets.forEach(conf => {
           if (sheetNames.includes(conf.name)) {
             const sheet = workbook.Sheets[conf.name];
-            const rows = XLSX.utils.sheet_to_json(sheet);
-            
+            let rows: any[] = XLSX.utils.sheet_to_json(sheet);
+
+            // Fix: if headers are __EMPTY*, header row detection failed — re-read from correct row
+            if (rows.length > 0 && Object.keys(rows[0]).every(k => k.startsWith('__EMPTY') || k === '__rowNum__')) {
+              console.log(`[provisions-fix] Sheet "${conf.name}" has __EMPTY headers, attempting auto-fix...`);
+              const rawRows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+              let headerIdx = 0;
+              for (let i = 0; i < Math.min(rawRows.length, 15); i++) {
+                const cells = (rawRows[i] || []).map((c: any) => String(c ?? '').toUpperCase());
+                if (cells.some((c: string) => c.includes('CONTRATO'))) { headerIdx = i; break; }
+              }
+              const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
+              range.s.r = headerIdx;
+              rows = XLSX.utils.sheet_to_json(sheet, { range: XLSX.utils.encode_range(range) });
+              console.log(`[provisions-fix] Re-read "${conf.name}" from row ${headerIdx + 1}, ${rows.length} rows. Headers:`, Object.keys(rows[0] || {}).slice(0, 10));
+            }
+
             rows.forEach((row: any) => {
               const r = NORMALIZE_HEADERS(row);
               
-              let contractId = r['CONTRATO'] || r['N° CONTRATO'] || r['N CONTRATO'];
+              let contractId = r['CONTRATO'] || r['CONTRATO_'] || r['N° CONTRATO'] || r['N CONTRATO'];
               if (!contractId) {
                 for (const [hKey, hVal] of Object.entries(r)) {
                   const upper = hKey.trim().toUpperCase().replace(/\s+/g, ' ');
-                  if (/^N.?\s?CONTRATO$/.test(upper) || upper === 'CONTRATO') { contractId = hVal; break; }
+                  if (/^N.?\s?CONTRATO_?$/.test(upper) || upper === 'CONTRATO' || upper === 'CONTRATO_') { contractId = hVal; break; }
                 }
               }
               const addendumId = r['ADENDA'];
