@@ -531,7 +531,10 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
                    } else if (conf.name === 'provisiones') {
                       val = parseNumber(
                         r['SALDO DE PROVISIONES (SIN IGV US$)'] ||
+                        r['SALDO DE PROVISIONES'] ||
+                        r['SALDO PROVISIONES (SIN IGV US$)'] ||
                         r['SALDO PROVISIONES'] ||
+                        r['PROVISIONES'] ||
                         r['MONTO']
                       );
                    } else if (conf.name === 'pagos') {
@@ -606,6 +609,43 @@ export const processExcelFile = async (file: File): Promise<ProcessingResult> =>
             });
           }
         });
+
+        // Debug: provisions data flow
+        if (sheetNames.includes('provisiones')) {
+          const pSheet = workbook.Sheets['provisiones'];
+          const pRows = XLSX.utils.sheet_to_json(pSheet);
+          console.log('[provisions-debug] Sheet "provisiones" found. Total rows:', pRows.length);
+          if (pRows.length > 0) {
+            const sample = NORMALIZE_HEADERS(pRows[0]);
+            console.log('[provisions-debug] Column names:', Object.keys(sample).filter(k => k === k.toUpperCase()));
+            console.log('[provisions-debug] First row sample:', JSON.stringify(sample).substring(0, 500));
+          }
+          let matchedCount = 0;
+          let totalProv = 0;
+          const unmatchedIds: string[] = [];
+          pRows.forEach((row: any) => {
+            const r = NORMALIZE_HEADERS(row);
+            const cId = r['CONTRATO'] || r['N° CONTRATO'] || r['N CONTRATO'];
+            const aId = r['ADENDA'];
+            const key = `${cId}-${aId}`;
+            const found = contractsMap.has(key) || contractsMap.has(`${cId}-0`);
+            if (found) {
+              matchedCount++;
+            } else if (unmatchedIds.length < 5) {
+              unmatchedIds.push(key);
+            }
+          });
+          contractsMap.forEach((c) => { if (c.provisions > 0) { totalProv += c.provisions; } });
+          console.log('[provisions-debug] Rows matched to contracts:', matchedCount, '/', pRows.length);
+          console.log('[provisions-debug] Total provisions accumulated:', totalProv);
+          if (unmatchedIds.length > 0) {
+            console.log('[provisions-debug] Sample UNMATCHED contract keys:', unmatchedIds);
+            const sampleKeys = Array.from(contractsMap.keys()).slice(0, 5);
+            console.log('[provisions-debug] Sample CONTRACT MAP keys:', sampleKeys);
+          }
+        } else {
+          console.log('[provisions-debug] Sheet "provisiones" NOT found. Available sheets:', sheetNames);
+        }
 
         // Special handling for 'avance_semanal' if it exists
         // Assuming it provides a percentage or amount for 'progress'
