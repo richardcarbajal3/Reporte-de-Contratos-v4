@@ -147,6 +147,23 @@ export default function ExecutiveView() {
   const totalPaid = kpiSource.reduce((acc, c) => acc + c.totalPaid, 0);
   // Suma de Retención (Pagos) + Garantías (Cartas Fianza)
   const totalRetentionAndGuarantees = kpiSource.reduce((acc, c) => acc + c.totalRetention + c.totalGuarantees, 0);
+  const totalProvisions = kpiSource.reduce((acc, c) => acc + c.totalExecuted, 0);
+
+  // Provisions detail per contract for the collapsible table
+  const provisionsDetail = useMemo(() => {
+    return kpiSource
+      .filter(c => c.totalExecuted > 0)
+      .map(c => {
+        const parent = c.items.find(i => i.addendumId === '0') || c.items[0];
+        return {
+          contractId: c.contractId,
+          description: parent?.description || '-',
+          company: parent?.company || '-',
+          provisions: c.totalExecuted,
+        };
+      })
+      .sort((a, b) => b.provisions - a.provisions);
+  }, [kpiSource]);
 
   // Executive KPIs: contract-source + specialized-source (E_ sheets)
   const executiveKpis = useMemo((): ComputedKpi[] => {
@@ -927,6 +944,67 @@ export default function ExecutiveView() {
             </div>
           )}
         </div>
+      )}
+
+      {/* Saldo de Provisiones Collapsible */}
+      {totalProvisions > 0 && (
+        <Collapsible open={isBlockOpen('saldo-provisiones')} onOpenChange={() => toggleBlock('saldo-provisiones')}>
+          <Card className="mb-8">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CollapsibleTrigger asChild>
+                <button className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity">
+                  {isBlockOpen('saldo-provisiones') ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <TrendingUp className="h-5 w-5 text-purple-600" />
+                      Saldo de Provisiones (Sin IGV US$)
+                    </CardTitle>
+                    <CardDescription className="text-left">
+                      Total: <span className="font-mono font-bold text-purple-700">{totalProvisions.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}</span>
+                      <span className="ml-2">({provisionsDetail.length} contratos)</span>
+                    </CardDescription>
+                  </div>
+                </button>
+              </CollapsibleTrigger>
+            </CardHeader>
+            <CollapsibleContent>
+              <CardContent>
+                <div className="max-h-[400px] overflow-auto border rounded-lg">
+                  <Table>
+                    <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
+                      <TableRow>
+                        <TableHead>Nro Contrato</TableHead>
+                        <TableHead>Descripción</TableHead>
+                        <TableHead>Proveedor</TableHead>
+                        <TableHead className="text-right">Saldo Provisiones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {provisionsDetail.map((row) => (
+                        <TableRow key={row.contractId} className="hover:bg-muted/50">
+                          <TableCell className="font-mono text-xs">{row.contractId}</TableCell>
+                          <TableCell className="text-xs max-w-[300px] truncate">{row.description}</TableCell>
+                          <TableCell className="text-xs">{row.company}</TableCell>
+                          <TableCell className="text-right font-mono text-xs font-medium text-purple-700">
+                            {row.provisions.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                    <TableFooter>
+                      <TableRow className="bg-muted/50 font-bold">
+                        <TableCell colSpan={3}>Total Saldo de Provisiones</TableCell>
+                        <TableCell className="text-right font-mono text-purple-700">
+                          {totalProvisions.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                        </TableCell>
+                      </TableRow>
+                    </TableFooter>
+                  </Table>
+                </div>
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
       )}
 
       {/* Charts Section */}
